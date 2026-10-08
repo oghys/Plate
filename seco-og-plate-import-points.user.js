@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         seco-og-plate-import-points
 // @namespace    seco-og
-// @version      1.11
+// @version      1.12
 // @description  Plate : éditeurs graphiques de points, bords, line loads et point loads (fond PDF calibré optionnel)
 // @match        https://program.groupseco.com/plate3/*
 // @updateURL    https://raw.githubusercontent.com/oghys/Plate/main/seco-og-plate-import-points.meta.js
@@ -50,13 +50,19 @@
         try { if (!flag()) { await api.clear(); return null; } return (await tx('readonly', st => st.get('bg'))) || null; }
         catch (e) { return null; }
       },
-      async putFile(name, buf) { try { setFlag(); await tx('readwrite', st => st.put({ name, buf, cal: null, page: 1 }, 'bg')); } catch (e) { /* */ } },
+      async putFile(name, buf) { try { setFlag(); await tx('readwrite', st => st.put({ name, buf, cals: {}, page: 1 }, 'bg')); } catch (e) { /* */ } },
       async putCal(cal, page) {
         try {
           const cur = await tx('readonly', st => st.get('bg')); if (!cur) return;
-          cur.cal = cal && cal.k && cal.o ? cal : null; cur.page = page || cur.page || 1;
+          cur.cals = cur.cals || {};
+          if (cur.cal) { cur.cals[cur.page || 1] = cur.cal; delete cur.cal; }      // ancien format : une seule calibration
+          if (cal && cal.k && cal.o) cur.cals[page || cur.page || 1] = cal; else delete cur.cals[page || cur.page || 1];
+          cur.page = page || cur.page || 1;
           await tx('readwrite', st => st.put(cur, 'bg'));
         } catch (e) { /* */ }
+      },
+      async putPage(page) {
+        try { const cur = await tx('readonly', st => st.get('bg')); if (!cur) return; cur.page = page; await tx('readwrite', st => st.put(cur, 'bg')); } catch (e) { /* */ }
       },
       async clear() { try { await tx('readwrite', st => st.delete('bg')); } catch (e) { /* */ } }
     };
@@ -292,7 +298,7 @@
     const nOld = loads.length;
 
     /* ---------- état ---------- */
-    const S = { pdf: null, page: null, pageNum: 1, name: '', vp1: null, vx: null, vy: null, showPdf: true, snapOn: true,
+    const S = { pdf: null, page: null, pageNum: 1, numPages: 1, cals: {}, name: '', vp1: null, vx: null, vy: null, showPdf: true, snapOn: true,
       mode: 'draw', cal: { k: null, o: null, axis: null, theta: 0 }, sa: null, sb: null };
     let inPlan = false, first = null, second = null, sel = -1, hover = null, last = { q: '-10', c: '', Fz: '-10', Cx: '', Cy: '' };
     const armed = () => isPs ? false : isPt ? !!first : !!second;
@@ -344,6 +350,8 @@
       '<label><input type="checkbox" id="ll-show" checked> afficher</label>' +
       '<label><input type="checkbox" id="ll-snap" checked> accrochage (points / sommets)</label>' +
       '<button type="button" class="btn" id="ll-forget" style="display:none">Retirer le PDF</button></div>' +
+      '<div class="row" id="ll-pagerow" style="display:none">Page du PDF : <button type="button" class="btn" id="ll-pprev" title="Page précédente">◀</button>' +
+      '<select id="ll-pg"></select><button type="button" class="btn" id="ll-pnext" title="Page suivante">▶</button><span class="mut" id="ll-pgn"></span></div>' +
       '<div class="row" id="ll-calrow" style="display:none">' +
       '<button type="button" class="btn" id="ll-bscale">1. Échelle</button><button type="button" class="btn" id="ll-borig">2. Origine</button>' +
       '<button type="button" class="btn" id="ll-baxis">3. Axe X (option)</button><button type="button" class="btn" id="ll-bdone">Terminer</button></div>' +
@@ -707,9 +715,17 @@
     function calStatus() {
       const c = S.cal;
       $('#ll-calst').textContent = !S.page ? '' : calibrated()
-        ? (S.name ? S.name + ' — ' : '') + 'PDF calibré (conservé pour la session) : échelle 1 m = ' + c.k.toFixed(2) + ' unités du plan' + (c.axis ? ', axe X défini' : ', axe X horizontal') + '.'
-        : (S.name ? S.name + ' — ' : '') + 'PDF chargé — calibration : échelle, puis origine (0 ; 0).';
+        ? (S.name ? S.name + ' — ' : '') + 'PDF calibré' + (S.numPages > 1 ? ' (page ' + S.pageNum + ')' : '') + ' (conservé pour la session) : échelle 1 m = ' + c.k.toFixed(2) + ' unités du plan' + (c.axis ? ', axe X défini' : ', axe X horizontal') + '.'
+        : (S.name ? S.name + ' — ' : '') + 'PDF chargé' + (S.numPages > 1 ? ' (page ' + S.pageNum + ')' : '') + ' — calibration : échelle, puis origine (0 ; 0).';
       $('#ll-calrow').style.display = S.page ? '' : 'none';
+      $('#ll-pagerow').style.display = S.page && S.numPages > 1 ? '' : 'none';
+      if (S.page && S.numPages > 1) {
+        const sl = $('#ll-pg');
+        if (sl.options.length !== S.numPages) { sl.innerHTML = ''; for (let i = 1; i <= S.numPages; i++) { const o = document.createElement('option'); o.value = i; o.textContent = i + (S.cals[i] ? ' ✓' : ''); sl.appendChild(o); } }
+        else for (let i = 1; i <= S.numPages; i++) sl.options[i - 1].textContent = i + (S.cals[i] ? ' ✓' : '');
+        sl.value = S.pageNum; $('#ll-pgn').textContent = '/ ' + S.numPages + (S.cals[S.pageNum] ? '' : ' (non calibrée)');
+        $('#ll-pprev').disabled = S.pageNum <= 1; $('#ll-pnext').disabled = S.pageNum >= S.numPages;
+      }
       $('#ll-forget').style.display = S.page ? '' : 'none';
       $('#ll-bscale').classList.toggle('on', inPlan && S.mode === 'scale');
       $('#ll-borig').classList.toggle('on', inPlan && S.mode === 'origin');
@@ -726,33 +742,53 @@
       inPlan = false; S.mode = 'draw'; fitWorld(); lastBuf = null; calStatus(); blit(); draw(); scheduleRender(10); saveCal();
     }
     $('#ll-load').onclick = () => $('#ll-file').click();
-    async function loadPdfData(buf, pageNum) {
+    async function setPage(n) {
       const L = ensurePdfjs();
-      const pdf = await L.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise;
-      const page = await pdf.getPage(Math.min(Math.max(pageNum || 1, 1), pdf.numPages));
-      S.pdf = pdf; S.page = page; S.pageNum = page.pageNumber; S.vp1 = page.getViewport({ scale: 1 });
-      S.cal = { k: null, o: null, axis: null, theta: 0 }; S.sa = S.sb = null;
+      const page = await S.pdf.getPage(Math.min(Math.max(n || 1, 1), S.pdf.numPages));
+      S.page = page; S.pageNum = page.pageNumber; S.vp1 = page.getViewport({ scale: 1 });
+      const c = S.cals[S.pageNum];
+      S.cal = c ? { k: c.k, o: c.o, axis: c.axis || null, theta: c.theta || 0 } : { k: null, o: null, axis: null, theta: 0 };
+      S.sa = S.sb = null; S.vx = S.vy = null;
       const v = await extractVerts(L, page, S.vp1); S.vx = v.vx; S.vy = v.vy;
-      return pdf.numPages;
     }
-    const saveCal = () => BG.putCal(S.cal, S.pageNum);
+    async function loadPdfData(buf, pageNum, cals) {
+      const L = ensurePdfjs();
+      S.pdf = await L.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise;
+      S.numPages = S.pdf.numPages; S.cals = cals || {};
+      await setPage(pageNum);
+      return S.numPages;
+    }
+    async function gotoPage(n) {
+      if (!S.pdf || n === S.pageNum || n < 1 || n > S.numPages) { calStatus(); return; }
+      try { await setPage(n); } catch (err) { alert('Page illisible : ' + (err && err.message || err)); return; }
+      BG.putPage(S.pageNum);
+      lastBuf = null;
+      if (calibrated()) { inPlan = false; S.mode = 'draw'; fitWorld(); calStatus(); blit(); draw(); scheduleRender(10); }
+      else enterPlan('scale');
+    }
+    const saveCal = () => {
+      if (S.cal.k && S.cal.o) S.cals[S.pageNum] = { k: S.cal.k, o: S.cal.o, axis: S.cal.axis || null, theta: S.cal.theta || 0 }; else delete S.cals[S.pageNum];
+      BG.putCal(S.cal, S.pageNum);
+    };
     $('#ll-file').onchange = async e => {
       const f = e.target.files[0]; if (!f) return;
       try {
         const buf = await f.arrayBuffer();
-        const n = await loadPdfData(buf, 1);
+        await loadPdfData(buf, 1, {});
         S.name = f.name; await BG.putFile(f.name, buf.slice(0));
         enterPlan('scale');
-        if (n > 1) alert('Ce PDF a ' + n + ' pages : seule la page 1 est utilisée.');
       } catch (err) { alert('Impossible de lire ce PDF : ' + (err && err.message || err)); }
       e.target.value = '';
     };
     $('#ll-forget').onclick = async () => {
       if (!confirm('Retirer le PDF de la session (plan, échelle et origine) ?')) return;
       await BG.clear();
-      S.pdf = S.page = null; S.name = ''; S.cal = { k: null, o: null, axis: null, theta: 0 }; S.sa = S.sb = null; S.vx = S.vy = null;
+      S.pdf = S.page = null; S.numPages = 1; S.cals = {}; S.name = ''; S.cal = { k: null, o: null, axis: null, theta: 0 }; S.sa = S.sb = null; S.vx = S.vy = null;
       inPlan = false; S.mode = 'draw'; lastBuf = null; fitWorld(); calStatus(); blit(); draw();
     };
+    $('#ll-pg').onchange = e => gotoPage(+e.target.value);
+    $('#ll-pprev').onclick = () => gotoPage(S.pageNum - 1);
+    $('#ll-pnext').onclick = () => gotoPage(S.pageNum + 1);
     $('#ll-show').onchange = ev => { S.showPdf = ev.target.checked; blit(); scheduleRender(10); };
     $('#ll-snap').onchange = ev => { S.snapOn = ev.target.checked; draw(); };
     $('#ll-bscale').onclick = () => { S.sa = S.sb = null; enterPlan('scale'); };
@@ -1013,11 +1049,12 @@
     BG.get().then(async rec => {
       if (!rec || !rec.buf || !ov.isConnected) return;
       try {
-        await loadPdfData(rec.buf, rec.page);
+        const cals = Object.assign({}, rec.cals || {});
+        if (rec.cal && rec.cal.k) cals[rec.page || 1] = rec.cal;                // ancien format
+        await loadPdfData(rec.buf, rec.page, cals);
         if (!ov.isConnected) return;
         S.name = rec.name || '';
-        if (rec.cal && rec.cal.k && rec.cal.o) {
-          S.cal = { k: rec.cal.k, o: rec.cal.o, axis: rec.cal.axis || null, theta: rec.cal.theta || 0 };
+        if (calibrated()) {
           inPlan = false; S.mode = 'draw'; fitWorld(); lastBuf = null; calStatus(); blit(); draw(); scheduleRender(10);
         } else enterPlan('scale');
       } catch (err) { /* PDF illisible : on ignore */ }
