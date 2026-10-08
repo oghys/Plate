@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         seco-og-plate-import-points
 // @namespace    seco-og
-// @version      1.10
+// @version      1.11
 // @description  Plate : éditeurs graphiques de points, bords, line loads et point loads (fond PDF calibré optionnel)
 // @match        https://program.groupseco.com/plate3/*
 // @updateURL    https://raw.githubusercontent.com/oghys/Plate/main/seco-og-plate-import-points.meta.js
@@ -88,11 +88,11 @@
     if (!fs || document.getElementById('seco-border-btn')) return;
     const b = document.createElement('button');
     b.type = 'button'; b.id = 'seco-border-btn';
-    b.textContent = 'Éditeur graphique de bords (clic sur les points)…';
+    b.textContent = 'Éditeur graphique de bords (clic sur les points, fond PDF optionnel)…';
     const legend = fs.querySelector('legend');
     legend.after(b);
     b.after(document.createElement('br'));
-    b.onclick = () => openBorderEditor(form);
+    b.onclick = () => openLoadEditor(form, 'borders');
   }
 
   /* --- lecture des points depuis le graphique de la page --- */
@@ -127,265 +127,6 @@
     }).filter(s => s.from && s.to);
   }
 
-  function openBorderEditor(form) {
-    const pts = readPoints();
-    if (pts.length < 2) {
-      alert('Impossible de lire les points depuis le graphique de la page.\nVérifie que des points existent (onglet Points).');
-      return;
-    }
-    const byName = Object.fromEntries(pts.map(p => [p.name, p]));
-    let types = [...form.querySelectorAll('select[name="border_type_[border]"] option')].map(o => o.value);
-    if (!types.length) types = ['free', 'simple', 'clamped', 'fixed'];
-    const COL = { free: '#8a8f98', simple: '#0b5cab', clamped: '#e07b00', fixed: '#c62828' };
-    const colOf = t => COL[t] || '#6a1b9a';
-
-    let segs = readBorders(form);
-    const def = { type: types.includes('simple') ? 'simple' : types[0], division: '2' };
-    let cur = null, chainStart = null, sel = -1, hover = null;
-    const V = { z: 1, px: 0, py: 0 };
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
-
-    /* ---- DOM ---- */
-    const ov = document.createElement('div');
-    ov.id = 'seco-bed';
-    ov.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:99999;background:#fff;display:flex;flex-direction:column;font:13px Arial,sans-serif;color:#1c2733';
-    ov.innerHTML =
-      '<style>' +
-      '#seco-bed button,#seco-bed select,#seco-bed input{font:inherit}' +
-      '#seco-bed .hd{display:flex;align-items:center;gap:10px;padding:6px 12px;background:#0b2a4a;color:#fff}' +
-      '#seco-bed .hd b{font-size:14px}#seco-bed .sp{flex:1}' +
-      '#seco-bed .main{flex:1;display:flex;min-height:0}' +
-      '#seco-bed .cvw{flex:1;position:relative;min-width:0;background:#f4f6f8}' +
-      '#seco-bed canvas{position:absolute;left:0;top:0;cursor:crosshair}' +
-      '#seco-bed .hint{position:absolute;left:10px;bottom:10px;background:rgba(28,39,51,.88);color:#fff;padding:6px 10px;border-radius:6px;pointer-events:none;max-width:70%}' +
-      '#seco-bed aside{width:430px;max-width:46vw;border-left:1px solid #d5dbe1;display:flex;flex-direction:column;min-height:0;background:#fff}' +
-      '#seco-bed .sec{padding:8px 12px;border-bottom:1px solid #d5dbe1}' +
-      '#seco-bed .row{display:flex;align-items:center;gap:8px;margin:4px 0;flex-wrap:wrap}' +
-      '#seco-bed .lg{display:inline-flex;align-items:center;gap:4px;margin-right:8px}' +
-      '#seco-bed .lg i{display:inline-block;width:16px;height:4px;border-radius:2px}' +
-      '#seco-bed .tw{flex:1;overflow:auto}' +
-      '#seco-bed table{border-collapse:collapse;width:100%}' +
-      '#seco-bed th{position:sticky;top:0;background:#f7f9fb;text-align:left;padding:4px;font-size:11.5px;color:#6b7885;border-bottom:1px solid #d5dbe1}' +
-      '#seco-bed td{padding:2px 3px;border-bottom:1px solid #eef1f4}' +
-      '#seco-bed td input,#seco-bed td select{width:100%;padding:2px 3px;border:1px solid #d5dbe1;border-radius:4px}' +
-      '#seco-bed tr.sel td{background:#e8f1fb}' +
-      '#seco-bed tr.old td:first-child{color:#6b7885}' +
-      '#seco-bed .pri{background:#0b5cab;color:#fff;border:1px solid #0b5cab;border-radius:5px;padding:5px 12px;cursor:pointer}' +
-      '#seco-bed .btn{background:#fff;border:1px solid #c5ccd3;border-radius:5px;padding:4px 10px;cursor:pointer}' +
-      '#seco-bed .btn:disabled{opacity:.45;cursor:default}' +
-      '</style>' +
-      '<div class="hd"><b>Plate — éditeur graphique de bords</b><span class="sp"></span>' +
-      '<button type="button" class="pri" id="sb-apply">Appliquer les bords</button>' +
-      '<button type="button" class="btn" id="sb-close">Annuler</button></div>' +
-      '<div class="main"><div class="cvw" id="sb-cvw"><canvas id="sb-cv"></canvas><div class="hint" id="sb-hint"></div></div>' +
-      '<aside>' +
-      '<div class="sec"><div class="row"><span>Nouveau bord :</span> type <select id="sb-type"></select>' +
-      ' division <input id="sb-div" size="3" style="width:46px"></div>' +
-      '<div class="row"><label><input type="checkbox" id="sb-chain" checked> Enchaîner (le point cliqué devient le départ suivant)</label></div>' +
-      '<div class="row"><button type="button" class="btn" id="sb-closec" disabled>Fermer le contour</button>' +
-      '<button type="button" class="btn" id="sb-stop" disabled>Interrompre la chaîne (Échap)</button></div>' +
-      '<div class="row" id="sb-legend"></div></div>' +
-      '<div class="sec" style="padding-bottom:2px"><b>Bords</b> <span id="sb-cnt"></span></div>' +
-      '<div class="tw"><table><thead><tr><th>Segment</th><th>Type</th><th>Div.</th><th>Rayon</th><th></th></tr></thead><tbody id="sb-body"></tbody></table></div>' +
-      '</aside></div>';
-    document.body.appendChild(ov);
-    const $ = s => ov.querySelector(s);
-    const cvw = $('#sb-cvw'), cv = $('#sb-cv'), ctx = cv.getContext('2d');
-
-    const typeSel = $('#sb-type');
-    types.forEach(t => { const o = document.createElement('option'); o.value = o.textContent = t; typeSel.appendChild(o); });
-    typeSel.value = def.type; $('#sb-div').value = def.division;
-    typeSel.onchange = () => { def.type = typeSel.value; };
-    $('#sb-div').oninput = e => { def.division = e.target.value; };
-    $('#sb-legend').innerHTML = types.map(t => '<span class="lg"><i style="background:' + colOf(t) + '"></i>' + t + '</span>').join('');
-
-    /* ---- géométrie ---- */
-    const sx = x => x * V.z + V.px, sy = y => -y * V.z + V.py;
-    const inv = (a, b) => ({ x: (a - V.px) / V.z, y: -(b - V.py) / V.z });
-    function fit() {
-      const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
-      const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
-      const w = cvw.clientWidth, h = cvw.clientHeight, pad = 55;
-      const dx = Math.max(maxx - minx, 1e-6), dy = Math.max(maxy - miny, 1e-6);
-      V.z = Math.min((w - 2 * pad) / dx, (h - 2 * pad) / dy);
-      V.px = pad + (w - 2 * pad - dx * V.z) / 2 - minx * V.z;
-      V.py = pad + (h - 2 * pad - dy * V.z) / 2 + maxy * V.z;
-    }
-    function resize() {
-      const w = cvw.clientWidth, h = cvw.clientHeight;
-      cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
-      cv.style.width = w + 'px'; cv.style.height = h + 'px';
-    }
-    const hitPoint = (a, b) => {
-      let best = null, bd = 11;
-      for (const p of pts) { const d = Math.hypot(sx(p.x) - a, sy(p.y) - b); if (d <= bd) { bd = d; best = p; } }
-      return best;
-    };
-    const hitSeg = (a, b) => {
-      let best = -1, bd = 7;
-      segs.forEach((s, i) => {
-        const p = byName[s.from], q = byName[s.to]; if (!p || !q) return;
-        const x1 = sx(p.x), y1 = sy(p.y), x2 = sx(q.x), y2 = sy(q.y);
-        const dx = x2 - x1, dy = y2 - y1, L = dx * dx + dy * dy || 1;
-        const t = Math.max(0, Math.min(1, ((a - x1) * dx + (b - y1) * dy) / L));
-        const d = Math.hypot(a - (x1 + t * dx), b - (y1 + t * dy));
-        if (d <= bd) { bd = d; best = i; }
-      });
-      return best;
-    };
-
-    /* ---- dessin ---- */
-    function draw() {
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, cv.width, cv.height);
-      ctx.lineCap = 'round'; ctx.textBaseline = 'middle';
-      segs.forEach((s, i) => {
-        const p = byName[s.from], q = byName[s.to]; if (!p || !q) return;
-        if (i === sel) { ctx.strokeStyle = 'rgba(255,179,0,.55)'; ctx.lineWidth = 10; line(p, q); }
-        ctx.strokeStyle = colOf(s.type); ctx.lineWidth = 3.5;
-        ctx.setLineDash(s.type === 'free' ? [7, 6] : []); line(p, q); ctx.setLineDash([]);
-        // repère de sens (petite flèche au milieu)
-        const mx = (sx(p.x) + sx(q.x)) / 2, my = (sy(p.y) + sy(q.y)) / 2, a = Math.atan2(sy(q.y) - sy(p.y), sx(q.x) - sx(p.x));
-        ctx.fillStyle = colOf(s.type); ctx.beginPath();
-        ctx.moveTo(mx + 6 * Math.cos(a), my + 6 * Math.sin(a));
-        ctx.lineTo(mx + 6 * Math.cos(a + 2.5), my + 6 * Math.sin(a + 2.5));
-        ctx.lineTo(mx + 6 * Math.cos(a - 2.5), my + 6 * Math.sin(a - 2.5)); ctx.fill();
-      });
-      if (cur && hover) {
-        const p = byName[cur];
-        ctx.strokeStyle = colOf(def.type); ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
-        ctx.beginPath(); ctx.moveTo(sx(p.x), sy(p.y)); ctx.lineTo(hover.x, hover.y); ctx.stroke(); ctx.setLineDash([]);
-      }
-      const hp = hover && hitPoint(hover.x, hover.y);
-      pts.forEach(p => {
-        const x = sx(p.x), y = sy(p.y), isCur = p.name === cur, isHov = hp && hp.name === p.name;
-        ctx.fillStyle = isCur ? '#e07b00' : (isHov ? '#1a8a4a' : '#d61f1f');
-        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(x, y, isCur || isHov ? 7 : 5.5, 0, 7); ctx.fill(); ctx.stroke();
-        ctx.font = 'bold 13px Arial'; ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(255,255,255,.92)'; ctx.fillStyle = '#7a0d0d';
-        ctx.strokeText(p.name, x + 9, y - 10); ctx.fillText(p.name, x + 9, y - 10);
-      });
-      $('#sb-closec').disabled = !(cur && chainStart && cur !== chainStart);
-      $('#sb-stop').disabled = !cur;
-      $('#sb-hint').textContent = cur
-        ? 'Point de départ : ' + cur + ' → clique le point d’arrivée (Échap = annuler).'
-        : 'Clique un premier point, puis un second : le bord est créé. Clic sur un segment = le sélectionner. Molette = zoom, glisser dans le vide = déplacer.';
-    }
-    function line(p, q) { ctx.beginPath(); ctx.moveTo(sx(p.x), sy(p.y)); ctx.lineTo(sx(q.x), sy(q.y)); ctx.stroke(); }
-
-    /* ---- tableau ---- */
-    function renderTable() {
-      const tb = $('#sb-body'); tb.innerHTML = '';
-      segs.forEach((s, i) => {
-        const tr = document.createElement('tr'); if (i === sel) tr.className = 'sel';
-        tr.innerHTML = '<td>' + s.from + ' → ' + s.to + '</td><td><select></select></td>' +
-          '<td style="width:44px"><input class="dv"></td><td style="width:54px"><input class="rd" placeholder="m"></td>' +
-          '<td style="width:22px"><button type="button" class="btn" style="padding:0 6px" title="Supprimer">✕</button></td>';
-        const se = tr.querySelector('select');
-        types.forEach(t => { const o = document.createElement('option'); o.value = o.textContent = t; se.appendChild(o); });
-        se.value = s.type;
-        tr.querySelector('.dv').value = s.division; tr.querySelector('.rd').value = s.radius;
-        se.onchange = () => { s.type = se.value; draw(); };
-        tr.querySelector('.dv').oninput = e => { s.division = e.target.value; };
-        tr.querySelector('.rd').oninput = e => { s.radius = e.target.value; };
-        tr.querySelector('button').onclick = ev => { ev.stopPropagation(); segs.splice(i, 1); if (sel >= segs.length) sel = -1; renderTable(); draw(); };
-        tr.onmousedown = () => { sel = i; [...tb.children].forEach((r, j) => r.classList.toggle('sel', j === i)); draw(); };
-        tb.appendChild(tr);
-      });
-      $('#sb-cnt').textContent = '(' + segs.length + ')';
-    }
-
-    /* ---- logique de tracé ---- */
-    function addSeg(a, c) {
-      const k = segs.findIndex(s => (s.from === a && s.to === c) || (s.from === c && s.to === a));
-      if (k >= 0) { sel = k; return; }                                   // déjà défini : on le sélectionne
-      segs.push({ from: a, to: c, division: def.division, radius: '', type: def.type, beam: 'none' });
-      sel = segs.length - 1;
-    }
-    function click(a, b) {
-      const p = hitPoint(a, b);
-      if (p) {
-        if (!cur) { cur = p.name; chainStart = p.name; }
-        else if (cur === p.name) { cur = null; chainStart = null; }
-        else { addSeg(cur, p.name); if ($('#sb-chain').checked) cur = p.name; else { cur = null; chainStart = null; } }
-      } else {
-        const i = hitSeg(a, b);
-        if (i >= 0) sel = i; else { cur = null; chainStart = null; }
-      }
-      renderTable(); draw();
-    }
-    $('#sb-closec').onclick = () => { if (cur && chainStart && cur !== chainStart) { addSeg(cur, chainStart); cur = null; chainStart = null; renderTable(); draw(); } };
-    $('#sb-stop').onclick = () => { cur = null; chainStart = null; draw(); };
-
-    /* ---- souris / clavier ---- */
-    let drag = null, space = false;
-    const pos = e => { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-    cv.oncontextmenu = e => e.preventDefault();
-    cv.onwheel = e => {
-      e.preventDefault();
-      const q = pos(e), f = Math.pow(1.0018, -e.deltaY), nz = Math.min(Math.max(V.z * f, 1e-3), 1e6), k = nz / V.z;
-      V.px = q.x - (q.x - V.px) * k; V.py = q.y - (q.y - V.py) * k; V.z = nz; draw();
-    };
-    cv.onpointerdown = e => {
-      cv.setPointerCapture(e.pointerId);
-      const q = pos(e);
-      drag = { x: q.x, y: q.y, px: V.px, py: V.py, mode: (e.button !== 0 || space) ? 'pan' : 'maybe' };
-    };
-    cv.onpointermove = e => {
-      const q = pos(e); hover = q;
-      if (drag) {
-        if (drag.mode === 'maybe' && Math.hypot(q.x - drag.x, q.y - drag.y) > 4) drag.mode = 'pan';
-        if (drag.mode === 'pan') { V.px = drag.px + q.x - drag.x; V.py = drag.py + q.y - drag.y; }
-      }
-      draw();
-    };
-    cv.onpointerup = e => {
-      const d = drag; drag = null;
-      if (d && d.mode === 'maybe') { const q = pos(e); click(q.x, q.y); }
-    };
-    cv.onpointerleave = () => { if (!drag) { hover = null; draw(); } };
-
-    const onKey = e => {
-      const tag = (e.target.tagName || '').toLowerCase();
-      if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
-      if (e.key === 'Escape') { cur = null; chainStart = null; draw(); }
-      else if (e.key === 'Delete' || e.key === 'Backspace') { if (sel >= 0) { segs.splice(sel, 1); sel = -1; renderTable(); draw(); } }
-      else if (e.code === 'Space') { space = true; e.preventDefault(); }
-    };
-    const onKeyUp = e => { if (e.code === 'Space') space = false; };
-    const onResize = () => { resize(); draw(); };
-    document.addEventListener('keydown', onKey);
-    document.addEventListener('keyup', onKeyUp);
-    window.addEventListener('resize', onResize);
-
-    const closeEd = () => {
-      document.removeEventListener('keydown', onKey); document.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('resize', onResize); ov.remove();
-    };
-    $('#sb-close').onclick = closeEd;
-
-    /* ---- application dans le formulaire + Apply ---- */
-    $('#sb-apply').onclick = () => {
-      if (!segs.length && !confirm('Aucun bord défini : tous les bords existants seront supprimés. Continuer ?')) return;
-      form.querySelectorAll('tr.border_rows').forEach(tr => tr.remove());
-      segs.forEach((s, j) => {
-        const k = j + 1;
-        addHidden(form, 'border__keys', k);
-        addHidden(form, 'border_name_' + k, s.from + '-' + s.to);
-        addHidden(form, 'border_from_' + k, s.from);
-        addHidden(form, 'border_to_' + k, s.to);
-        addHidden(form, 'border_division_' + k, s.division);
-        addHidden(form, 'border_radius_' + k, s.radius);
-        addHidden(form, 'border_type_' + k, s.type);
-        addHidden(form, 'border_beam_' + k, s.beam || 'none');
-      });
-      closeEd();
-      const fsB = [...form.querySelectorAll('fieldset')].find(f => { const l = f.querySelector('legend'); return l && /^\s*Borders\s*$/.test(l.textContent); });
-      (fsB.querySelector('button[name="submit"]') || form.querySelector('button[name="submit"]')).click();
-    };
-
-    resize(); fit(); renderTable(); draw();
-  }
   /* =====================================================================
    *  PAGE « LOADCASES » : line loads posées librement sur le schéma
    *  (points + bords du modèle, fond PDF optionnel calibré)
@@ -477,8 +218,14 @@
   }
 
   function openLoadEditor(form, kind) {
-    const isPt = kind === 'point', isPs = kind === 'points';
-    const CFG = isPs
+    const isPt = kind === 'point', isPs = kind === 'points', isBd = kind === 'borders';
+    if (isBd && readPoints().length < 2) {
+      alert('Impossible de lire les points depuis le graphique de la page.\nVérifie que des points existent (onglet Points).');
+      return;
+    }
+    const CFG = isBd
+      ? { legend: 'Borders', prefix: 'border', fields: [], cols: ['type', 'division', 'radius'], name: 'bords' }
+      : isPs
       ? { legend: 'Points', prefix: 'point', fields: ['name', 'x', 'y', 'Cx', 'Cy', 'Fz'], cols: ['x', 'y', 'Cx', 'Cy', 'Fz'], name: 'points' }
       : isPt
       ? { legend: 'Point loads', prefix: 'pointload', fields: ['x', 'y', 'Fz', 'Cx', 'Cy'], cols: ['Fz', 'Cx', 'Cy'], name: 'point loads' }
@@ -498,13 +245,14 @@
     raw.forEach(p => {
       if (!firstByName[p.name]) firstByName[p.name] = p;
       const key = p.x.toFixed(6) + '|' + p.y.toFixed(6);
+      if (isBd) { pts.push({ name: p.name, x: p.x, y: p.y }); return; }   // bords : noms tels quels
       if (isPs || seen[key]) return; seen[key] = 1;
       let n = p.name; used[n] = (used[n] || 0) + 1;
       if (used[n] > 1) n = p.name + '#' + used[n];
       pts.push({ name: n, x: p.x, y: p.y });
     });
     const bords = [];                                   // bords déduits des bulles « Border X-Y »
-    ((g && g.bubbles) || []).forEach(bb => {
+    (isBd ? [] : ((g && g.bubbles) || [])).forEach(bb => {
       const m = /^Border\s+(.+)$/.exec(bb.text || ''); if (!m) return;
       const nm = m[1].trim(); let done = false;
       for (let i = 1; i < nm.length && !done; i++) {
@@ -520,7 +268,14 @@
     const near = (x, y) => pts.find(p => Math.abs(p.x - x) < 1e-6 && Math.abs(p.y - y) < 1e-6);
     const lab = p => p.name || '(' + r2(p.x) + ' ; ' + r2(p.y) + ')';
 
-    let loads = isPs ? formPts : [...form.querySelectorAll('tr.' + CFG.prefix + '_rows')].map(tr => {
+    let types = [...form.querySelectorAll('select[name="border_type_[border]"] option')].map(o => o.value);
+    if (!types.length) types = ['free', 'simple', 'clamped', 'fixed'];
+    const COL = { free: '#8a8f98', simple: '#0b5cab', clamped: '#e07b00', fixed: '#c62828' };
+    const colOf = tp => COL[tp] || '#6a1b9a';
+    const byName = firstByName;
+    const bdef = { type: types.includes('simple') ? 'simple' : types[0], division: '2' };
+    let cur = null, chainStart = null;
+    let loads = isPs ? formPts : isBd ? readBorders(form).map(s => Object.assign(s, { label: s.from + ' → ' + s.to })) : [...form.querySelectorAll('tr.' + CFG.prefix + '_rows')].map(tr => {
       const k = (tr.querySelector('input[name="' + CFG.prefix + '__keys"]') || {}).value;
       const gg = n => { const e = tr.querySelector('[name="' + CFG.prefix + '_' + n + '_' + k + '"]'); return e ? e.value : ''; };
       const o = {}; CFG.fields.forEach(f => { o[f] = gg(f); });
@@ -569,6 +324,8 @@
       '#seco-lled th{position:sticky;top:0;background:#f7f9fb;text-align:left;padding:4px;font-size:11.5px;color:#6b7885;border-bottom:1px solid #d5dbe1}' +
       '#seco-lled td{padding:2px 3px;border-bottom:1px solid #eef1f4}' +
       '#seco-lled td input{width:100%;padding:2px 3px;border:1px solid #d5dbe1;border-radius:4px}' +
+      '#seco-lled td select{width:100%;padding:2px 3px;border:1px solid #d5dbe1;border-radius:4px}' +
+      '#seco-lled .lg{display:inline-flex;align-items:center;gap:4px;margin-right:8px}#seco-lled .lg i{display:inline-block;width:16px;height:4px;border-radius:2px}' +
       '#seco-lled tr.sel td{background:#e8f1fb}' +
       '#seco-lled .pri{background:#0b5cab;color:#fff;border:1px solid #0b5cab;border-radius:5px;padding:5px 12px;cursor:pointer}' +
       '#seco-lled .btn{background:#fff;border:1px solid #c5ccd3;border-radius:5px;padding:4px 10px;cursor:pointer}' +
@@ -592,6 +349,10 @@
       '<button type="button" class="btn" id="ll-baxis">3. Axe X (option)</button><button type="button" class="btn" id="ll-bdone">Terminer</button></div>' +
       '<div class="row" id="ll-distrow" style="display:none">Distance réelle : <input type="text" id="ll-dist" placeholder="m"> m <button type="button" class="btn" id="ll-bdist">OK</button></div>' +
       '<div class="mut" id="ll-calst"></div></div>' +
+      (isBd ? '<div class="sec" id="ll-bdset"><div class="row"><span>Nouveau bord :</span> type <select id="bd-type"></select> division <input type="text" id="bd-div" style="width:46px"></div>' +
+        '<div class="row"><label><input type="checkbox" id="bd-chain" checked> Enchaîner (le point cliqué devient le départ suivant)</label></div>' +
+        '<div class="row"><button type="button" class="btn" id="bd-closec" disabled>Fermer le contour</button><button type="button" class="btn" id="bd-stop" disabled>Interrompre la chaîne (Échap)</button></div>' +
+        '<div class="row" id="bd-legend"></div></div>' : '') +
       '<div class="sec" id="ll-new" style="display:none">' +
       '<div><b id="ll-title"></b></div>' +
       (isPt
@@ -601,13 +362,13 @@
           '<div class="row" id="ll-end" style="display:none">q2 <input type="text" id="ll-q2"> kN/m &nbsp; c2 <input type="text" id="ll-c2"> kNm/m</div>') +
       '<div class="row"><button type="button" class="pri" id="ll-add">Ajouter (Entrée)</button><button type="button" class="btn" id="ll-cancel">Annuler (Échap)</button></div>' +
       '</div>' +
-      '<div class="sec mut">' + (isPs
+      '<div class="sec mut">' + (isBd ? 'Clique un premier point, puis un second : le bord est créé (clic sur un segment = le sélectionner, Suppr = le supprimer). Charge un PDF calibré pour t’en servir de fond : ses échelle et origine sont conservées pour la session.' : isPs
         ? 'Clique sur le schéma pour ajouter un point (accrochage aux sommets du PDF si activé). Clic sur un point = le sélectionner, glisser un point = le déplacer, Suppr = le supprimer. Nom, x, y et appuis (Cx, Cy, Fz : vide = libre ; x = bloqué ; nombre = raideur) sont modifiables dans le tableau. Rouge = existants, bleu = nouveaux.'
         : isPt
         ? 'Clique librement l’emplacement de la charge sur le schéma (accrochage aux points du modèle et aux sommets du PDF si activé). Fz &lt; 0 = vers le bas. Gris = bords du modèle.'
         : 'Clique librement deux points sur le schéma (accrochage aux points du modèle et aux sommets du PDF si activé). q &lt; 0 = vers le bas ; c &gt; 0 = horaire dans le sens de la ligne (= ordre des clics). Gris = bords du modèle.') + '</div>' +
-      '<div class="sec" style="padding-bottom:2px"><b>' + (isPs ? 'Points' : isPt ? 'Point loads' : 'Line loads') + '</b> <span id="ll-cnt"></span></div>' +
-      '<div class="tw"><table><thead><tr><th>' + (isPs ? 'Nom' : isPt ? 'Point' : 'Ligne') + '</th>' + CFG.cols.map(c => '<th>' + c + '</th>').join('') + '<th></th></tr></thead><tbody id="ll-body"></tbody></table></div>' +
+      '<div class="sec" style="padding-bottom:2px"><b>' + (isBd ? 'Bords' : isPs ? 'Points' : isPt ? 'Point loads' : 'Line loads') + '</b> <span id="ll-cnt"></span></div>' +
+      '<div class="tw"><table><thead><tr><th>' + (isBd ? 'Segment' : isPs ? 'Nom' : isPt ? 'Point' : 'Ligne') + '</th>' + CFG.cols.map(c => '<th>' + (isBd ? { type: 'Type', division: 'Div.', radius: 'Rayon' }[c] : c) + '</th>').join('') + '<th></th></tr></thead><tbody id="ll-body"></tbody></table></div>' +
       '</aside></div>';
     document.body.appendChild(ov);
     const $ = s => ov.querySelector(s);
@@ -642,7 +403,7 @@
     /* ---------- vue ---------- */
     function fitWorld() {
       let xs = pts.map(p => p.x), ys = pts.map(p => p.y);
-      loads.forEach(l => { if (isPt || isPs) { xs.push(l.x); ys.push(l.y); } else { xs.push(l.x1, l.x2); ys.push(l.y1, l.y2); } });
+      loads.forEach(l => { if (isBd) return; if (isPt || isPs) { xs.push(l.x); ys.push(l.y); } else { xs.push(l.x1, l.x2); ys.push(l.y1, l.y2); } });
       if (S.page && calibrated()) {
         [[0, 0], [S.vp1.width, 0], [0, S.vp1.height], [S.vp1.width, S.vp1.height]].forEach(c => { const r = toReal({ x: c[0], y: c[1] }); xs.push(r.x); ys.push(r.y); });
       }
@@ -745,6 +506,7 @@
           : S.mode === 'origin' ? 'Origine : clique le point du plan qui correspond à (0 ; 0) de Plate.'
           : 'Axe X (optionnel) : clique un point sur l’axe X du repère de Plate, ou « Terminer ».';
       }
+      if (isBd) return cur ? 'Point de départ : ' + cur + ' → clique le point d’arrivée (Échap = annuler).' : 'Clique un premier point, puis un second : le bord est créé. Clic sur un segment = le sélectionner. Molette = zoom, glisser = déplacer.';
       if (isPs) return 'Clique pour ajouter un point. Clic sur un point = le sélectionner, glisser = le déplacer, Suppr = le supprimer. Molette = zoom, glisser dans le vide = déplacer.';
       if (isPt) return first ? 'Entre Fz, Cx, Cy dans le panneau de droite, puis Entrée (Échap = annuler).'
         : 'Clique l’emplacement de la point load sur le schéma. Clic sur une charge existante = la sélectionner. Molette = zoom, glisser = déplacer.';
@@ -778,6 +540,15 @@
       bords.forEach(s => { ctx.beginPath(); ctx.moveTo(wsx(s.a.x), wsy(s.a.y)); ctx.lineTo(wsx(s.b.x), wsy(s.b.y)); ctx.stroke(); });
       // charges
       loads.forEach((s, i) => {
+        if (isBd) {
+          const p = byName[s.from], q = byName[s.to]; if (!p || !q) return;
+          const x1 = wsx(p.x), y1 = wsy(p.y), x2 = wsx(q.x), y2 = wsy(q.y), cb = colOf(s.type);
+          if (i === sel) { ctx.strokeStyle = 'rgba(255,179,0,.55)'; ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+          ctx.strokeStyle = cb; ctx.lineWidth = 3.5; ctx.setLineDash(s.type === 'free' ? [7, 6] : []);
+          ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.setLineDash([]);
+          arrow((x1 + x2) / 2, (y1 + y2) / 2, Math.atan2(y2 - y1, x2 - x1), cb);
+          return;
+        }
         const col = i < nOld && !s.edited ? '#8a6d1d' : '#0b5cab';
         ctx.font = 'bold 12px Arial'; ctx.lineWidth = 3.5;
         if (isPs) {
@@ -811,7 +582,12 @@
         ctx.strokeText(t, (x1 + x2) / 2 + 8, (y1 + y2) / 2 + 12); ctx.fillText(t, (x1 + x2) / 2 + 8, (y1 + y2) / 2 + 12);
       });
       drawOrigin();
-      const hs = hover && !armed() ? snapWorld(hover.x, hover.y) : null;
+      const hs = hover && !armed() && !isBd ? snapWorld(hover.x, hover.y) : null;
+      const hpb = isBd && hover ? hitPt(hover.x, hover.y) : null;
+      if (isBd && cur && hover && byName[cur]) {
+        ctx.strokeStyle = colOf(bdef.type); ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(wsx(byName[cur].x), wsy(byName[cur].y)); ctx.lineTo(hover.x, hover.y); ctx.stroke(); ctx.setLineDash([]);
+      }
       if (!isPt && first && hs && !second) {
         ctx.strokeStyle = '#e07b00'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
         ctx.beginPath(); ctx.moveTo(wsx(first.x), wsy(first.y)); ctx.lineTo(wsx(hs.x), wsy(hs.y)); ctx.stroke(); ctx.setLineDash([]);
@@ -820,9 +596,9 @@
         ctx.strokeStyle = '#e07b00'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(wsx(first.x), wsy(first.y)); ctx.lineTo(wsx(second.x), wsy(second.y)); ctx.stroke();
       }
       pts.forEach(p => {
-        const x = wsx(p.x), y = wsy(p.y), isHov = hs && hs.kind === 'pt' && hs.name === p.name;
-        ctx.fillStyle = isHov ? '#1a8a4a' : '#d61f1f'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(x, y, isHov ? 7 : 5, 0, 7); ctx.fill(); ctx.stroke();
+        const x = wsx(p.x), y = wsy(p.y), isCur = isBd && p.name === cur, isHov = isBd ? (hpb && hpb.name === p.name) : (hs && hs.kind === 'pt' && hs.name === p.name);
+        ctx.fillStyle = isCur ? '#e07b00' : isHov ? '#1a8a4a' : '#d61f1f'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(x, y, isHov || isCur ? 7 : 5, 0, 7); ctx.fill(); ctx.stroke();
         ctx.font = 'bold 13px Arial'; ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(255,255,255,.92)'; ctx.fillStyle = '#7a0d0d';
         ctx.strokeText(p.name, x + 9, y - 10); ctx.fillText(p.name, x + 9, y - 10);
       });
@@ -843,7 +619,28 @@
     }
 
     /* ---------- tableau ---------- */
+    function renderBdTable() {
+      const tb = $('#ll-body'); tb.innerHTML = '';
+      loads.forEach((s, i) => {
+        const tr = document.createElement('tr'); if (i === sel) tr.className = 'sel';
+        tr.innerHTML = '<td style="font-size:12px">' + s.from + ' → ' + s.to + '</td><td><select></select></td>' +
+          '<td style="width:44px"><input class="dv"></td><td style="width:54px"><input class="rd" placeholder="m"></td>' +
+          '<td style="width:22px"><button type="button" class="btn" style="padding:0 6px" title="Supprimer">✕</button></td>';
+        const se = tr.querySelector('select');
+        types.forEach(tp => { const o = document.createElement('option'); o.value = o.textContent = tp; se.appendChild(o); });
+        se.value = s.type;
+        tr.querySelector('.dv').value = s.division; tr.querySelector('.rd').value = s.radius;
+        se.onchange = () => { s.type = se.value; draw(); };
+        tr.querySelector('.dv').oninput = e => { s.division = e.target.value; };
+        tr.querySelector('.rd').oninput = e => { s.radius = e.target.value; };
+        tr.querySelector('button').onclick = ev => { ev.stopPropagation(); loads.splice(i, 1); if (sel >= loads.length) sel = -1; renderTable(); draw(); };
+        tr.onmousedown = () => { sel = i; [...tb.children].forEach((rw, j) => rw.classList.toggle('sel', j === i)); draw(); };
+        tb.appendChild(tr);
+      });
+      $('#ll-cnt').textContent = '(' + loads.length + ')';
+    }
     function renderTable() {
+      if (isBd) { renderBdTable(); return; }
       const tb = $('#ll-body'); tb.innerHTML = '';
       loads.forEach((s, i) => {
         const tr = document.createElement('tr'); if (i === sel) tr.className = 'sel';
@@ -885,7 +682,7 @@
       $('#ll-end').style.display = e.target.checked ? '' : 'none';
       if (e.target.checked) { $('#ll-q2').value = $('#ll-q').value; $('#ll-c2').value = $('#ll-c').value; }
     };
-    function cancelNew() { first = null; second = null; showNew(); draw(); }
+    function cancelNew() { if (isBd) { cur = null; chainStart = null; updBd(); draw(); return; } first = null; second = null; showNew(); draw(); }
     function addLoad() {
       if (isPt) {
         const Fz = $('#ll-fz').value.trim() || '0', Cx = $('#ll-cx').value.trim(), Cy = $('#ll-cy').value.trim();
@@ -1002,6 +799,43 @@
       loads.forEach((s, i) => { const d = Math.hypot(wsx(s.x) - a, wsy(s.y) - b); if (d <= bd) { bd = d; best = i; } });
       return best;
     };
+    const hitPt = (a, b) => {
+      let best = null, bd = 11;
+      for (const p of pts) { const d = Math.hypot(wsx(p.x) - a, wsy(p.y) - b); if (d <= bd) { bd = d; best = p; } }
+      return best;
+    };
+    const hitSeg = (a, b) => {
+      let best = -1, bd = 7;
+      loads.forEach((s, i) => {
+        const p = byName[s.from], q = byName[s.to]; if (!p || !q) return;
+        const x1 = wsx(p.x), y1 = wsy(p.y), dx = wsx(q.x) - x1, dy = wsy(q.y) - y1, L = dx * dx + dy * dy || 1;
+        const tt = Math.max(0, Math.min(1, ((a - x1) * dx + (b - y1) * dy) / L));
+        const d = Math.hypot(a - (x1 + tt * dx), b - (y1 + tt * dy));
+        if (d <= bd) { bd = d; best = i; }
+      });
+      return best;
+    };
+    function updBd() {
+      if (!isBd) return;
+      $('#bd-closec').disabled = !(cur && chainStart && cur !== chainStart);
+      $('#bd-stop').disabled = !cur;
+    }
+    function addSeg(a, c) {
+      const k = loads.findIndex(s => (s.from === a && s.to === c) || (s.from === c && s.to === a));
+      if (k >= 0) { sel = k; return; }                                   // déjà défini : on le sélectionne
+      loads.push({ from: a, to: c, division: bdef.division, radius: '', type: bdef.type, beam: 'none', label: a + ' → ' + c, edited: true });
+      sel = loads.length - 1;
+    }
+    if (isBd) {
+      const ts = $('#bd-type');
+      types.forEach(tp => { const o = document.createElement('option'); o.value = o.textContent = tp; ts.appendChild(o); });
+      ts.value = bdef.type; $('#bd-div').value = bdef.division;
+      ts.onchange = () => { bdef.type = ts.value; };
+      $('#bd-div').oninput = e => { bdef.division = e.target.value; };
+      $('#bd-legend').innerHTML = types.map(tp => '<span class="lg"><i style="background:' + colOf(tp) + '"></i>' + tp + '</span>').join('');
+      $('#bd-closec').onclick = () => { if (cur && chainStart && cur !== chainStart) { addSeg(cur, chainStart); cur = null; chainStart = null; renderTable(); updBd(); draw(); } };
+      $('#bd-stop').onclick = () => { cur = null; chainStart = null; updBd(); draw(); };
+    }
     function autoName() {
       const usedN = new Set(loads.map(l => l.name));
       for (let i = 0; i < 26; i++) { const n = String.fromCharCode(65 + i); if (!usedN.has(n)) return n; }
@@ -1009,6 +843,18 @@
     }
     function click(a, b) {
       if (inPlan) { calClick(a, b); return; }
+      if (isBd) {
+        const p = hitPt(a, b);
+        if (p) {
+          if (!cur) { cur = p.name; chainStart = p.name; }
+          else if (cur === p.name) { cur = null; chainStart = null; }
+          else { addSeg(cur, p.name); if ($('#bd-chain').checked) cur = p.name; else { cur = null; chainStart = null; } }
+        } else {
+          const i = hitSeg(a, b);
+          if (i >= 0) sel = i; else { cur = null; chainStart = null; }
+        }
+        renderTable(); updBd(); draw(); return;
+      }
       if (isPs) {
         const i = hitPs(a, b);
         if (i >= 0) { sel = i; }
@@ -1124,6 +970,25 @@
         closeEd();
         const fsP = [...form.querySelectorAll('fieldset')].find(f => { const l = f.querySelector('legend'); return l && l.textContent.trim() === 'Points'; });
         (fsP ? fsP.querySelector('button[name="submit"]') : form.querySelector('button[name="submit"]')).click();
+        return;
+      }
+      if (isBd) {
+        if (!loads.length && !confirm('Aucun bord défini : tous les bords existants seront supprimés. Continuer ?')) return;
+        form.querySelectorAll('tr.border_rows').forEach(tr => tr.remove());
+        loads.forEach((s, j) => {
+          const k = j + 1;
+          addHidden(form, 'border__keys', k);
+          addHidden(form, 'border_name_' + k, s.from + '-' + s.to);
+          addHidden(form, 'border_from_' + k, s.from);
+          addHidden(form, 'border_to_' + k, s.to);
+          addHidden(form, 'border_division_' + k, s.division);
+          addHidden(form, 'border_radius_' + k, s.radius);
+          addHidden(form, 'border_type_' + k, s.type);
+          addHidden(form, 'border_beam_' + k, s.beam || 'none');
+        });
+        closeEd();
+        const fsB = [...form.querySelectorAll('fieldset')].find(f => { const l = f.querySelector('legend'); return l && /^\s*Borders\s*$/.test(l.textContent); });
+        (fsB.querySelector('button[name="submit"]') || form.querySelector('button[name="submit"]')).click();
         return;
       }
       const cols = CFG.cols;
