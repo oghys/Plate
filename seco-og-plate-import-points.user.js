@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         seco-og-plate-import-points
 // @namespace    seco-og
-// @version      1.12
+// @version      1.14
 // @description  Plate : éditeurs graphiques de points, bords, line loads et point loads (fond PDF calibré optionnel)
 // @match        https://program.groupseco.com/plate3/*
 // @updateURL    https://raw.githubusercontent.com/oghys/Plate/main/seco-og-plate-import-points.meta.js
@@ -19,6 +19,132 @@
     i.type = 'hidden'; i.name = n; i.value = v;
     form.appendChild(i);
   };
+
+  /* =====================================================================
+   *  Langue de l'interface : français (défaut), néerlandais, anglais
+   *  Choix conservé dans localStorage ('seco-plate-lang')
+   * ===================================================================== */
+  const LANGS = ['fr', 'nl', 'en'];
+  let LANG = 'fr';
+  try { const l = localStorage.getItem('seco-plate-lang'); if (LANGS.includes(l)) LANG = l; } catch (e) { /* pas de stockage : français */ }
+  const D = {
+    contact: ['Bug ou request ? →', 'Bug of aanvraag? →', 'Bug or request? →'],
+    lang_title: ['Langue', 'Taal', 'Language'],
+    pts_legend: ['Éditeur de points', 'Puntenbewerker', 'Points editor'],
+    pts_btn: ['Éditeur graphique de points (avec ou sans plan PDF)…', 'Grafische puntenbewerker (met of zonder pdf-plan)…', 'Graphical points editor (with or without PDF plan)…'],
+    bd_btn: ['Éditeur graphique de bords (clic sur les points, fond PDF optionnel)…', 'Grafische randenbewerker (klik op de punten, pdf-achtergrond optioneel)…', 'Graphical borders editor (click the points, optional PDF background)…'],
+    ll_btn: ['Éditeur graphique de line loads (schéma + fond PDF)…', 'Grafische line-loads-bewerker (schema + pdf-achtergrond)…', 'Graphical line loads editor (diagram + PDF background)…'],
+    pl_btn: ['Éditeur graphique de point loads (schéma + fond PDF)…', 'Grafische point-loads-bewerker (schema + pdf-achtergrond)…', 'Graphical point loads editor (diagram + PDF background)…'],
+    err_nopts: ['Impossible de lire les points depuis le graphique de la page.\nVérifie que des points existent (onglet Points).', 'De punten kunnen niet uit de grafiek van de pagina gelezen worden.\nControleer of er punten bestaan (tabblad Points).', 'Cannot read the points from the page graphic.\nCheck that points exist (Points tab).'],
+    head_bd: ['Plate — éditeur graphique de bords', 'Plate — grafische randenbewerker', 'Plate — graphical borders editor'],
+    head_ps: ['Plate — éditeur graphique de points', 'Plate — grafische puntenbewerker', 'Plate — graphical points editor'],
+    head_pl: ['Plate — éditeur graphique de point loads', 'Plate — grafische point-loads-bewerker', 'Plate — graphical point loads editor'],
+    head_ll: ['Plate — éditeur graphique de line loads', 'Plate — grafische line-loads-bewerker', 'Plate — graphical line loads editor'],
+    apply_bd: ['Appliquer les bords', 'Randen toepassen', 'Apply borders'],
+    apply_ps: ['Appliquer les points', 'Punten toepassen', 'Apply points'],
+    apply_pl: ['Appliquer les point loads', 'Point loads toepassen', 'Apply point loads'],
+    apply_ll: ['Appliquer les line loads', 'Line loads toepassen', 'Apply line loads'],
+    nm_bd: ['bords', 'randen', 'borders'], nm_ps: ['points', 'punten', 'points'], nm_pl: ['point loads', 'point loads', 'point loads'], nm_ll: ['line loads', 'line loads', 'line loads'],
+    cancel: ['Annuler', 'Annuleren', 'Cancel'],
+    pdf_title: ['Fond PDF (optionnel)', 'Pdf-achtergrond (optioneel)', 'PDF background (optional)'],
+    load_pdf: ['Charger un PDF…', 'Pdf laden…', 'Load a PDF…'],
+    show: ['afficher', 'tonen', 'show'],
+    snap: ['accrochage (points / sommets)', 'magnetisme (punten / hoekpunten)', 'snapping (points / vertices)'],
+    forget: ['Retirer le PDF', 'Pdf verwijderen', 'Remove the PDF'],
+    page_lbl: ['Page du PDF :', 'Pdf-pagina:', 'PDF page:'],
+    prev: ['Page précédente', 'Vorige pagina', 'Previous page'],
+    next: ['Page suivante', 'Volgende pagina', 'Next page'],
+    b_scale: ['1. Échelle', '1. Schaal', '1. Scale'],
+    b_orig: ['2. Origine', '2. Oorsprong', '2. Origin'],
+    b_axis: ['3. Axe X (option)', '3. X-as (optie)', '3. X axis (option)'],
+    b_done: ['Terminer', 'Voltooien', 'Done'],
+    dist_lbl: ['Distance réelle :', 'Werkelijke afstand:', 'Real distance:'],
+    bd_new: ['Nouveau bord :', 'Nieuwe rand:', 'New border:'],
+    bd_type: ['type', 'type', 'type'],
+    bd_div: ['division', 'verdeling', 'division'],
+    bd_chain: ['Enchaîner (le point cliqué devient le départ suivant)', 'Aaneenschakelen (het aangeklikte punt wordt het volgende beginpunt)', 'Chain (the clicked point becomes the next start)'],
+    bd_close: ['Fermer le contour', 'Contour sluiten', 'Close the outline'],
+    bd_stop: ['Interrompre la chaîne (Échap)', 'Keten onderbreken (Esc)', 'Stop the chain (Esc)'],
+    empty: ['(vide)', '(leeg)', '(empty)'],
+    diff: ['valeurs différentes au point d’arrivée', 'andere waarden in het eindpunt', 'different values at the end point'],
+    add: ['Ajouter (Entrée)', 'Toevoegen (Enter)', 'Add (Enter)'],
+    cancel2: ['Annuler (Échap)', 'Annuleren (Esc)', 'Cancel (Esc)'],
+    help_bd: ['Clique un premier point, puis un second : le bord est créé (clic sur un segment = le sélectionner, Suppr = le supprimer). Charge un PDF calibré pour t’en servir de fond : ses échelle et origine sont conservées pour la session.',
+      'Klik een eerste punt en dan een tweede: de rand wordt aangemaakt (klik op een segment = selecteren, Del = verwijderen). Laad een gekalibreerde pdf als achtergrond: schaal en oorsprong blijven bewaard voor de sessie.',
+      'Click a first point, then a second one: the border is created (click a segment = select it, Del = delete it). Load a calibrated PDF as background: its scale and origin are kept for the session.'],
+    help_ps: ['Clique sur le schéma pour ajouter un point (accrochage aux sommets du PDF si activé). Clic sur un point = le sélectionner, glisser un point = le déplacer, Suppr = le supprimer. Nom, x, y et appuis (Cx, Cy, Fz : vide = libre ; x = bloqué ; nombre = raideur) sont modifiables dans le tableau. Rouge = existants, bleu = nouveaux.',
+      'Klik op het schema om een punt toe te voegen (magnetisme op de hoekpunten van de pdf indien actief). Klik op een punt = selecteren, een punt slepen = verplaatsen, Del = verwijderen. Naam, x, y en steunpunten (Cx, Cy, Fz: leeg = vrij; x = geblokkeerd; getal = stijfheid) kunnen in de tabel aangepast worden. Rood = bestaand, blauw = nieuw.',
+      'Click on the diagram to add a point (snapping to PDF vertices if enabled). Click a point = select it, drag a point = move it, Del = delete it. Name, x, y and supports (Cx, Cy, Fz: empty = free; x = fixed; number = stiffness) can be edited in the table. Red = existing, blue = new.'],
+    help_pl: ['Clique librement l’emplacement de la charge sur le schéma (accrochage aux points du modèle et aux sommets du PDF si activé). Fz < 0 = vers le bas. Gris = bords du modèle.',
+      'Klik vrij de plaats van de belasting op het schema (magnetisme op de punten van het model en de hoekpunten van de pdf indien actief). Fz < 0 = naar beneden. Grijs = randen van het model.',
+      'Click the load location freely on the diagram (snapping to model points and PDF vertices if enabled). Fz < 0 = downwards. Grey = model borders.'],
+    help_ll: ['Clique librement deux points sur le schéma (accrochage aux points du modèle et aux sommets du PDF si activé). q < 0 = vers le bas ; c > 0 = horaire dans le sens de la ligne (= ordre des clics). Gris = bords du modèle.',
+      'Klik vrij twee punten op het schema (magnetisme op de punten van het model en de hoekpunten van de pdf indien actief). q < 0 = naar beneden; c > 0 = met de klok mee in de richting van de lijn (= volgorde van de klikken). Grijs = randen van het model.',
+      'Click two points freely on the diagram (snapping to model points and PDF vertices if enabled). q < 0 = downwards; c > 0 = clockwise along the line direction (= click order). Grey = model borders.'],
+    sec_bd: ['Bords', 'Randen', 'Borders'], sec_ps: ['Points', 'Punten', 'Points'], sec_pl: ['Point loads', 'Point loads', 'Point loads'], sec_ll: ['Line loads', 'Line loads', 'Line loads'],
+    th_bd: ['Segment', 'Segment', 'Segment'], th_ps: ['Nom', 'Naam', 'Name'], th_pl: ['Point', 'Punt', 'Point'], th_ll: ['Ligne', 'Lijn', 'Line'],
+    th_type: ['Type', 'Type', 'Type'], th_div: ['Div.', 'Verd.', 'Div.'], th_rad: ['Rayon', 'Straal', 'Radius'],
+    contact: ['Bug ou request ? =>', 'Bug of verzoek? =>', 'Bug or request? =>'],
+    del: ['Supprimer', 'Verwijderen', 'Delete'],
+    h_scale2: ['Entre la distance réelle entre ces deux points (panneau de droite).', 'Geef de werkelijke afstand tussen deze twee punten in (rechterpaneel).', 'Enter the real distance between these two points (right panel).'],
+    h_scale: ['Échelle : clique deux points dont tu connais la distance réelle.', 'Schaal: klik twee punten waarvan je de werkelijke afstand kent.', 'Scale: click two points whose real distance you know.'],
+    h_origin: ['Origine : clique le point du plan qui correspond à (0 ; 0) de Plate.', 'Oorsprong: klik het punt van het plan dat overeenkomt met (0 ; 0) van Plate.', 'Origin: click the point on the plan that matches (0 ; 0) in Plate.'],
+    h_axis: ['Axe X (optionnel) : clique un point sur l’axe X du repère de Plate, ou « Terminer ».', 'X-as (optioneel): klik een punt op de X-as van het Plate-assenstelsel, of « Voltooien ».', 'X axis (optional): click a point on the X axis of the Plate coordinate system, or “Done”.'],
+    h_from: [n => 'Point de départ : ' + n + ' → clique le point d’arrivée (Échap = annuler).', n => 'Beginpunt: ' + n + ' → klik het eindpunt (Esc = annuleren).', n => 'Start point: ' + n + ' → click the end point (Esc = cancel).'],
+    h_bd: ['Clique un premier point, puis un second : le bord est créé. Clic sur un segment = le sélectionner. Molette = zoom, glisser = déplacer.', 'Klik een eerste punt en dan een tweede: de rand wordt aangemaakt. Klik op een segment = selecteren. Wieltje = zoom, slepen = verschuiven.', 'Click a first point, then a second one: the border is created. Click a segment = select it. Wheel = zoom, drag = pan.'],
+    h_ps: ['Clique pour ajouter un point. Clic sur un point = le sélectionner, glisser = le déplacer, Suppr = le supprimer. Molette = zoom, glisser dans le vide = déplacer.', 'Klik om een punt toe te voegen. Klik op een punt = selecteren, slepen = verplaatsen, Del = verwijderen. Wieltje = zoom, slepen in het lege = verschuiven.', 'Click to add a point. Click a point = select it, drag = move it, Del = delete it. Wheel = zoom, drag on empty space = pan.'],
+    h_pl1: ['Entre Fz, Cx, Cy dans le panneau de droite, puis Entrée (Échap = annuler).', 'Geef Fz, Cx, Cy in het rechterpaneel in en druk op Enter (Esc = annuleren).', 'Enter Fz, Cx, Cy in the right panel, then Enter (Esc = cancel).'],
+    h_pl: ['Clique l’emplacement de la point load sur le schéma. Clic sur une charge existante = la sélectionner. Molette = zoom, glisser = déplacer.', 'Klik de plaats van de point load op het schema. Klik op een bestaande belasting = selecteren. Wieltje = zoom, slepen = verschuiven.', 'Click the point load location on the diagram. Click an existing load = select it. Wheel = zoom, drag = pan.'],
+    h_ll2: ['Entre q et c dans le panneau de droite, puis Entrée.', 'Geef q en c in het rechterpaneel in en druk op Enter.', 'Enter q and c in the right panel, then Enter.'],
+    h_ll: ['Clique deux points quelconques du schéma pour créer une line load. Clic sur une ligne = la sélectionner. Molette = zoom, glisser = déplacer.', 'Klik twee willekeurige punten op het schema om een line load te maken. Klik op een lijn = selecteren. Wieltje = zoom, slepen = verschuiven.', 'Click any two points on the diagram to create a line load. Click a line = select it. Wheel = zoom, drag = pan.'],
+    new_pl: [a => 'Nouvelle point load : ' + a, a => 'Nieuwe point load: ' + a, a => 'New point load: ' + a],
+    new_ll: [(a, b) => 'Nouvelle line load : ' + a + ' → ' + b, (a, b) => 'Nieuwe line load: ' + a + ' → ' + b, (a, b) => 'New line load: ' + a + ' → ' + b],
+    v_pl: ['Valeurs numériques attendues pour Fz, Cx et Cy.', 'Numerieke waarden verwacht voor Fz, Cx en Cy.', 'Numeric values expected for Fz, Cx and Cy.'],
+    v_ll: ['Valeurs numériques attendues pour q et c.', 'Numerieke waarden verwacht voor q en c.', 'Numeric values expected for q and c.'],
+    cal_ok: [(pg, k, ax) => 'PDF calibré' + pg + ' (conservé pour la session) : échelle 1 m = ' + k + ' unités du plan' + (ax ? ', axe X défini' : ', axe X horizontal') + '.',
+      (pg, k, ax) => 'Pdf gekalibreerd' + pg + ' (bewaard voor de sessie): schaal 1 m = ' + k + ' eenheden van het plan' + (ax ? ', X-as bepaald' : ', X-as horizontaal') + '.',
+      (pg, k, ax) => 'PDF calibrated' + pg + ' (kept for the session): scale 1 m = ' + k + ' plan units' + (ax ? ', X axis defined' : ', X axis horizontal') + '.'],
+    cal_todo: [pg => 'PDF chargé' + pg + ' — calibration : échelle, puis origine (0 ; 0).', pg => 'Pdf geladen' + pg + ' — kalibratie: schaal, daarna oorsprong (0 ; 0).', pg => 'PDF loaded' + pg + ' — calibration: scale, then origin (0 ; 0).'],
+    pg_part: [n => ' (page ' + n + ')', n => ' (pagina ' + n + ')', n => ' (page ' + n + ')'],
+    uncal: [' (non calibrée)', ' (niet gekalibreerd)', ' (not calibrated)'],
+    a_scale_orig: ['Définis d’abord l’échelle et l’origine.', 'Bepaal eerst de schaal en de oorsprong.', 'Define the scale and the origin first.'],
+    a_orig: ['Définis d’abord l’origine.', 'Bepaal eerst de oorsprong.', 'Define the origin first.'],
+    a_page: [m => 'Page illisible : ' + m, m => 'Pagina onleesbaar: ' + m, m => 'Unreadable page: ' + m],
+    a_pdf: [m => 'Impossible de lire ce PDF : ' + m, m => 'Deze pdf kan niet gelezen worden: ' + m, m => 'Cannot read this PDF: ' + m],
+    c_forget: ['Retirer le PDF de la session (plan, échelle et origine) ?', 'De pdf uit de sessie verwijderen (plan, schaal en oorsprong)?', 'Remove the PDF from the session (plan, scale and origin)?'],
+    a_dist: ['Distance réelle invalide.', 'Ongeldige werkelijke afstand.', 'Invalid real distance.'],
+    a_same: ['Les deux points sont confondus.', 'De twee punten vallen samen.', 'The two points coincide.'],
+    a_busy: ['Une charge est en cours de saisie : clique « Ajouter » ou annule-la.', 'Er wordt een belasting ingevoerd: klik « Toevoegen » of annuleer.', 'A load is being entered: click “Add” or cancel it.'],
+    a_noname: ['Un point n’a pas de nom.', 'Een punt heeft geen naam.', 'A point has no name.'],
+    a_dup: [n => 'Nom de point en double : ' + n, n => 'Dubbele puntnaam: ' + n, n => 'Duplicate point name: ' + n],
+    a_support: [n => 'Appui invalide pour le point ' + n + ' (vide, x ou une raideur numérique).', n => 'Ongeldig steunpunt voor punt ' + n + ' (leeg, x of een numerieke stijfheid).', n => 'Invalid support for point ' + n + ' (empty, x or a numeric stiffness).'],
+    c_nopts: ['Aucun point : tous les points existants seront supprimés. Continuer ?', 'Geen punten: alle bestaande punten worden verwijderd. Doorgaan?', 'No points: all existing points will be deleted. Continue?'],
+    c_nobd: ['Aucun bord défini : tous les bords existants seront supprimés. Continuer ?', 'Geen randen: alle bestaande randen worden verwijderd. Doorgaan?', 'No border defined: all existing borders will be deleted. Continue?'],
+    a_nonnum: [l => 'Valeur non numérique dans la ligne ' + l + '.', l => 'Niet-numerieke waarde in de rij ' + l + '.', l => 'Non-numeric value in row ' + l + '.'],
+    c_noload: [n => 'Aucune charge : toutes les ' + n + ' existantes seront supprimées. Continuer ?', n => 'Geen belasting: alle bestaande ' + n + ' worden verwijderd. Doorgaan?', n => 'No load: all existing ' + n + ' will be deleted. Continue?']
+  };
+  const T = (k, ...a) => { const e = D[k]; if (!e) return k; const v = e[LANGS.indexOf(LANG)] || e[0]; return typeof v === 'function' ? v(...a) : v; };
+  let onLang = null;                                        // rafraîchissement des textes dynamiques de l'éditeur ouvert
+  function applyI18n(root) {
+    root.querySelectorAll('[data-i]').forEach(e => { e.textContent = T(e.dataset.i); });
+    root.querySelectorAll('[data-ip]').forEach(e => { e.placeholder = T(e.dataset.ip); });
+    root.querySelectorAll('[data-it]').forEach(e => { e.title = T(e.dataset.it); });
+  }
+  function setLang(l) {
+    if (!LANGS.includes(l)) return;
+    LANG = l; try { localStorage.setItem('seco-plate-lang', l); } catch (e) { /* */ }
+    document.querySelectorAll('select.seco-lang').forEach(s => { s.value = l; });
+    applyI18n(document);
+    if (onLang) onLang();
+  }
+  function langSelect() {
+    const s = document.createElement('select');
+    s.className = 'seco-lang'; s.dataset.it = 'lang_title'; s.title = T('lang_title');
+    s.style.cssText = 'margin-left:8px';
+    LANGS.forEach(l => { const o = document.createElement('option'); o.value = l; o.textContent = l.toUpperCase(); s.appendChild(o); });
+    s.value = LANG; s.onchange = () => setLang(s.value);
+    return s;
+  }
 
   const pointsForm = document.querySelector('form[action*="set+points"]');
   const bordersForm = document.querySelector('form[action*="set+borders"]');
@@ -77,9 +203,10 @@
     const box = document.createElement('fieldset');
     box.id = 'seco-import';
     box.innerHTML =
-      '<legend>Éditeur de points</legend>' +
-      '<button type="button" id="seco-pts-btn">Éditeur graphique de points (avec ou sans plan PDF)…</button>';
-    form.prepend(box);
+      '<legend data-i="pts_legend"></legend>' +
+      '<button type="button" id="seco-pts-btn" data-i="pts_btn"></button>';
+    box.appendChild(langSelect());
+    form.prepend(box); applyI18n(box);
     document.getElementById('seco-pts-btn').onclick = () => openLoadEditor(form, 'points');
   }
 
@@ -94,10 +221,11 @@
     if (!fs || document.getElementById('seco-border-btn')) return;
     const b = document.createElement('button');
     b.type = 'button'; b.id = 'seco-border-btn';
-    b.textContent = 'Éditeur graphique de bords (clic sur les points, fond PDF optionnel)…';
+    b.dataset.i = 'bd_btn'; b.textContent = T('bd_btn');
     const legend = fs.querySelector('legend');
     legend.after(b);
-    b.after(document.createElement('br'));
+    const ls = langSelect(); b.after(ls);
+    ls.after(document.createElement('br'));
     b.onclick = () => openLoadEditor(form, 'borders');
   }
 
@@ -138,18 +266,19 @@
    *  (points + bords du modèle, fond PDF optionnel calibré)
    * ===================================================================== */
   function initLoads(form) {
-    [['Line loads', 'seco-ll-btn', 'line', 'Éditeur graphique de line loads (schéma + fond PDF)…'],
-     ['Point loads', 'seco-pl-btn', 'point', 'Éditeur graphique de point loads (schéma + fond PDF)…']].forEach(([legendTxt, id, kind, txt]) => {
+    [['Line loads', 'seco-ll-btn', 'line', 'll_btn'],
+     ['Point loads', 'seco-pl-btn', 'point', 'pl_btn']].forEach(([legendTxt, id, kind, txt]) => {
       const fs = [...form.querySelectorAll('fieldset')].find(f => {
         const l = f.querySelector('legend');
         return l && l.textContent.trim() === legendTxt;
       });
       if (!fs || document.getElementById(id)) return;
       const b = document.createElement('button');
-      b.type = 'button'; b.id = id; b.textContent = txt;
+      b.type = 'button'; b.id = id; b.dataset.i = txt; b.textContent = T(txt);
       const legend = fs.querySelector('legend');
       legend.after(b);
-      b.after(document.createElement('br'));
+      const ls = langSelect(); b.after(ls);
+      ls.after(document.createElement('br'));
       b.onclick = () => openLoadEditor(form, kind);
     });
   }
@@ -226,9 +355,10 @@
   function openLoadEditor(form, kind) {
     const isPt = kind === 'point', isPs = kind === 'points', isBd = kind === 'borders';
     if (isBd && readPoints().length < 2) {
-      alert('Impossible de lire les points depuis le graphique de la page.\nVérifie que des points existent (onglet Points).');
+      alert(T('err_nopts'));
       return;
     }
+    const KEY = isBd ? 'bd' : isPs ? 'ps' : isPt ? 'pl' : 'll';
     const CFG = isBd
       ? { legend: 'Borders', prefix: 'border', fields: [], cols: ['type', 'division', 'radius'], name: 'bords' }
       : isPs
@@ -316,6 +446,7 @@
       '#seco-lled button,#seco-lled select,#seco-lled input{font:inherit}' +
       '#seco-lled .hd{display:flex;align-items:center;gap:10px;padding:6px 12px;background:#0b2a4a;color:#fff}' +
       '#seco-lled .hd b{font-size:14px}#seco-lled .sp{flex:1}' +
+      '#seco-lled .ct{font-size:12px;color:#c9d6e3}#seco-lled .ct a{color:#8fcbff}' +
       '#seco-lled .main{flex:1;display:flex;min-height:0}' +
       '#seco-lled .cvw{flex:1;position:relative;min-width:0;background:#e9ecef;overflow:hidden}' +
       '#seco-lled canvas{position:absolute;left:0;top:0}' +
@@ -340,46 +471,48 @@
       '#seco-lled #ll-new{background:#fff7e0;border-left:4px solid #e07b00}' +
       '#seco-lled .mut{font-size:12px;color:#4a5866}' +
       '</style>' +
-      '<div class="hd"><b>Plate — éditeur graphique de ' + CFG.name + '</b><span class="sp"></span>' +
-      '<button type="button" class="pri" id="ll-apply">Appliquer les ' + CFG.name + '</button>' +
-      '<button type="button" class="btn" id="ll-close">Annuler</button></div>' +
+      '<div class="hd"><b data-i="head_' + KEY + '"></b><span class="sp"></span>' +
+      '<span class="ct"><span data-i="contact"></span> <a href="mailto:o.ghys@groupseco.com">OG (o.ghys@groupseco.com)</a></span>' +
+      '<select id="ll-lang" class="seco-lang" data-it="lang_title"></select>' +
+      '<button type="button" class="pri" id="ll-apply" data-i="apply_' + KEY + '"></button>' +
+      '<button type="button" class="btn" id="ll-close" data-i="cancel"></button></div>' +
       '<div class="main"><div class="cvw" id="ll-cvw"><canvas id="ll-pdf"></canvas><canvas id="ll-ov"></canvas><div class="hint" id="ll-hint"></div></div>' +
       '<aside>' +
-      '<div class="sec"><b>Fond PDF (optionnel)</b>' +
-      '<div class="row"><button type="button" class="btn" id="ll-load">Charger un PDF…</button><input type="file" id="ll-file" accept=".pdf,application/pdf" style="display:none">' +
-      '<label><input type="checkbox" id="ll-show" checked> afficher</label>' +
-      '<label><input type="checkbox" id="ll-snap" checked> accrochage (points / sommets)</label>' +
-      '<button type="button" class="btn" id="ll-forget" style="display:none">Retirer le PDF</button></div>' +
-      '<div class="row" id="ll-pagerow" style="display:none">Page du PDF : <button type="button" class="btn" id="ll-pprev" title="Page précédente">◀</button>' +
-      '<select id="ll-pg"></select><button type="button" class="btn" id="ll-pnext" title="Page suivante">▶</button><span class="mut" id="ll-pgn"></span></div>' +
+      '<div class="sec"><b data-i="pdf_title"></b>' +
+      '<div class="row"><button type="button" class="btn" id="ll-load" data-i="load_pdf"></button><input type="file" id="ll-file" accept=".pdf,application/pdf" style="display:none">' +
+      '<label><input type="checkbox" id="ll-show" checked> <span data-i="show"></span></label>' +
+      '<label><input type="checkbox" id="ll-snap" checked> <span data-i="snap"></span></label>' +
+      '<button type="button" class="btn" id="ll-forget" style="display:none" data-i="forget"></button></div>' +
+      '<div class="row" id="ll-pagerow" style="display:none"><span data-i="page_lbl"></span> <button type="button" class="btn" id="ll-pprev" data-it="prev">◀</button>' +
+      '<select id="ll-pg"></select><button type="button" class="btn" id="ll-pnext" data-it="next">▶</button><span class="mut" id="ll-pgn"></span></div>' +
       '<div class="row" id="ll-calrow" style="display:none">' +
-      '<button type="button" class="btn" id="ll-bscale">1. Échelle</button><button type="button" class="btn" id="ll-borig">2. Origine</button>' +
-      '<button type="button" class="btn" id="ll-baxis">3. Axe X (option)</button><button type="button" class="btn" id="ll-bdone">Terminer</button></div>' +
-      '<div class="row" id="ll-distrow" style="display:none">Distance réelle : <input type="text" id="ll-dist" placeholder="m"> m <button type="button" class="btn" id="ll-bdist">OK</button></div>' +
+      '<button type="button" class="btn" id="ll-bscale" data-i="b_scale"></button><button type="button" class="btn" id="ll-borig" data-i="b_orig"></button>' +
+      '<button type="button" class="btn" id="ll-baxis" data-i="b_axis"></button><button type="button" class="btn" id="ll-bdone" data-i="b_done"></button></div>' +
+      '<div class="row" id="ll-distrow" style="display:none"><span data-i="dist_lbl"></span> <input type="text" id="ll-dist" placeholder="m"> m <button type="button" class="btn" id="ll-bdist">OK</button></div>' +
       '<div class="mut" id="ll-calst"></div></div>' +
-      (isBd ? '<div class="sec" id="ll-bdset"><div class="row"><span>Nouveau bord :</span> type <select id="bd-type"></select> division <input type="text" id="bd-div" style="width:46px"></div>' +
-        '<div class="row"><label><input type="checkbox" id="bd-chain" checked> Enchaîner (le point cliqué devient le départ suivant)</label></div>' +
-        '<div class="row"><button type="button" class="btn" id="bd-closec" disabled>Fermer le contour</button><button type="button" class="btn" id="bd-stop" disabled>Interrompre la chaîne (Échap)</button></div>' +
+      (isBd ? '<div class="sec" id="ll-bdset"><div class="row"><span data-i="bd_new"></span> <span data-i="bd_type"></span> <select id="bd-type"></select> <span data-i="bd_div"></span> <input type="text" id="bd-div" style="width:46px"></div>' +
+        '<div class="row"><label><input type="checkbox" id="bd-chain" checked> <span data-i="bd_chain"></span></label></div>' +
+        '<div class="row"><button type="button" class="btn" id="bd-closec" disabled data-i="bd_close"></button><button type="button" class="btn" id="bd-stop" disabled data-i="bd_stop"></button></div>' +
         '<div class="row" id="bd-legend"></div></div>' : '') +
       '<div class="sec" id="ll-new" style="display:none">' +
       '<div><b id="ll-title"></b></div>' +
       (isPt
-        ? '<div class="row">Fz <input type="text" id="ll-fz" placeholder="-10"> kN &nbsp; Cx <input type="text" id="ll-cx" placeholder="(vide)"> kNm &nbsp; Cy <input type="text" id="ll-cy" placeholder="(vide)"> kNm</div>'
-        : '<div class="row">q <input type="text" id="ll-q" placeholder="-10"> kN/m &nbsp; c <input type="text" id="ll-c" placeholder="(vide)"> kNm/m</div>' +
-          '<div class="row"><label><input type="checkbox" id="ll-diff"> valeurs différentes au point d’arrivée</label></div>' +
+        ? '<div class="row">Fz <input type="text" id="ll-fz" placeholder="-10"> kN &nbsp; Cx <input type="text" id="ll-cx" data-ip="empty"> kNm &nbsp; Cy <input type="text" id="ll-cy" data-ip="empty"> kNm</div>'
+        : '<div class="row">q <input type="text" id="ll-q" placeholder="-10"> kN/m &nbsp; c <input type="text" id="ll-c" data-ip="empty"> kNm/m</div>' +
+          '<div class="row"><label><input type="checkbox" id="ll-diff"> <span data-i="diff"></span></label></div>' +
           '<div class="row" id="ll-end" style="display:none">q2 <input type="text" id="ll-q2"> kN/m &nbsp; c2 <input type="text" id="ll-c2"> kNm/m</div>') +
-      '<div class="row"><button type="button" class="pri" id="ll-add">Ajouter (Entrée)</button><button type="button" class="btn" id="ll-cancel">Annuler (Échap)</button></div>' +
+      '<div class="row"><button type="button" class="pri" id="ll-add" data-i="add"></button><button type="button" class="btn" id="ll-cancel" data-i="cancel2"></button></div>' +
       '</div>' +
-      '<div class="sec mut">' + (isBd ? 'Clique un premier point, puis un second : le bord est créé (clic sur un segment = le sélectionner, Suppr = le supprimer). Charge un PDF calibré pour t’en servir de fond : ses échelle et origine sont conservées pour la session.' : isPs
-        ? 'Clique sur le schéma pour ajouter un point (accrochage aux sommets du PDF si activé). Clic sur un point = le sélectionner, glisser un point = le déplacer, Suppr = le supprimer. Nom, x, y et appuis (Cx, Cy, Fz : vide = libre ; x = bloqué ; nombre = raideur) sont modifiables dans le tableau. Rouge = existants, bleu = nouveaux.'
-        : isPt
-        ? 'Clique librement l’emplacement de la charge sur le schéma (accrochage aux points du modèle et aux sommets du PDF si activé). Fz &lt; 0 = vers le bas. Gris = bords du modèle.'
-        : 'Clique librement deux points sur le schéma (accrochage aux points du modèle et aux sommets du PDF si activé). q &lt; 0 = vers le bas ; c &gt; 0 = horaire dans le sens de la ligne (= ordre des clics). Gris = bords du modèle.') + '</div>' +
-      '<div class="sec" style="padding-bottom:2px"><b>' + (isBd ? 'Bords' : isPs ? 'Points' : isPt ? 'Point loads' : 'Line loads') + '</b> <span id="ll-cnt"></span></div>' +
-      '<div class="tw"><table><thead><tr><th>' + (isBd ? 'Segment' : isPs ? 'Nom' : isPt ? 'Point' : 'Ligne') + '</th>' + CFG.cols.map(c => '<th>' + (isBd ? { type: 'Type', division: 'Div.', radius: 'Rayon' }[c] : c) + '</th>').join('') + '<th></th></tr></thead><tbody id="ll-body"></tbody></table></div>' +
+      '<div class="sec mut" data-i="help_' + KEY + '"></div>' +
+      '<div class="sec" style="padding-bottom:2px"><b data-i="sec_' + KEY + '"></b> <span id="ll-cnt"></span></div>' +
+      '<div class="tw"><table><thead><tr><th data-i="th_' + KEY + '"></th>' + CFG.cols.map(c => isBd ? '<th data-i="th_' + { type: 'type', division: 'div', radius: 'rad' }[c] + '"></th>' : '<th>' + c + '</th>').join('') + '<th></th></tr></thead><tbody id="ll-body"></tbody></table></div>' +
+      '<div class="sec mut" style="border-top:1px solid #d5dbe1;border-bottom:0"><span data-i="contact"></span> <a href="mailto:o.ghys@groupseco.com">OG (o.ghys@groupseco.com)</a></div>' +
       '</aside></div>';
     document.body.appendChild(ov);
     const $ = s => ov.querySelector(s);
+    LANGS.forEach(l => { const o = document.createElement('option'); o.value = l; o.textContent = l.toUpperCase(); $('#ll-lang').appendChild(o); });
+    $('#ll-lang').value = LANG; $('#ll-lang').onchange = e => setLang(e.target.value);
+    applyI18n(ov);
     const cvw = $('#ll-cvw'), pdfc = $('#ll-pdf'), cv = $('#ll-ov'), ctx = cv.getContext('2d');
 
     /* ---------- calibration / conversions ---------- */
@@ -510,17 +643,13 @@
     }
     function hintText() {
       if (inPlan) {
-        return S.mode === 'scale' ? (S.sa && S.sb ? 'Entre la distance réelle entre ces deux points (panneau de droite).' : 'Échelle : clique deux points dont tu connais la distance réelle.')
-          : S.mode === 'origin' ? 'Origine : clique le point du plan qui correspond à (0 ; 0) de Plate.'
-          : 'Axe X (optionnel) : clique un point sur l’axe X du repère de Plate, ou « Terminer ».';
+        return S.mode === 'scale' ? (S.sa && S.sb ? T('h_scale2') : T('h_scale'))
+          : S.mode === 'origin' ? T('h_origin') : T('h_axis');
       }
-      if (isBd) return cur ? 'Point de départ : ' + cur + ' → clique le point d’arrivée (Échap = annuler).' : 'Clique un premier point, puis un second : le bord est créé. Clic sur un segment = le sélectionner. Molette = zoom, glisser = déplacer.';
-      if (isPs) return 'Clique pour ajouter un point. Clic sur un point = le sélectionner, glisser = le déplacer, Suppr = le supprimer. Molette = zoom, glisser dans le vide = déplacer.';
-      if (isPt) return first ? 'Entre Fz, Cx, Cy dans le panneau de droite, puis Entrée (Échap = annuler).'
-        : 'Clique l’emplacement de la point load sur le schéma. Clic sur une charge existante = la sélectionner. Molette = zoom, glisser = déplacer.';
-      return second ? 'Entre q et c dans le panneau de droite, puis Entrée.'
-        : first ? 'Point de départ : ' + lab(first) + ' → clique le point d’arrivée (Échap = annuler).'
-        : 'Clique deux points quelconques du schéma pour créer une line load. Clic sur une ligne = la sélectionner. Molette = zoom, glisser = déplacer.';
+      if (isBd) return cur ? T('h_from', cur) : T('h_bd');
+      if (isPs) return T('h_ps');
+      if (isPt) return first ? T('h_pl1') : T('h_pl');
+      return second ? T('h_ll2') : first ? T('h_from', lab(first)) : T('h_ll');
     }
     function draw() {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -633,7 +762,7 @@
         const tr = document.createElement('tr'); if (i === sel) tr.className = 'sel';
         tr.innerHTML = '<td style="font-size:12px">' + s.from + ' → ' + s.to + '</td><td><select></select></td>' +
           '<td style="width:44px"><input class="dv"></td><td style="width:54px"><input class="rd" placeholder="m"></td>' +
-          '<td style="width:22px"><button type="button" class="btn" style="padding:0 6px" title="Supprimer">✕</button></td>';
+          '<td style="width:22px"><button type="button" class="btn" style="padding:0 6px" title="' + T('del') + '">✕</button></td>';
         const se = tr.querySelector('select');
         types.forEach(tp => { const o = document.createElement('option'); o.value = o.textContent = tp; se.appendChild(o); });
         se.value = s.type;
@@ -653,7 +782,7 @@
       loads.forEach((s, i) => {
         const tr = document.createElement('tr'); if (i === sel) tr.className = 'sel';
         tr.innerHTML = (isPs ? '<td style="width:52px"><input data-f="name"></td>' : '<td style="font-size:12px">' + s.label + '</td>') + CFG.cols.map(f => '<td style="width:48px"><input data-f="' + f + '"></td>').join('') +
-          '<td style="width:22px"><button type="button" class="btn" style="padding:0 6px" title="Supprimer">✕</button></td>';
+          '<td style="width:22px"><button type="button" class="btn" style="padding:0 6px" title="' + T('del') + '">✕</button></td>';
         tr.querySelectorAll('input').forEach(inp => {
           const f = inp.dataset.f, numeric = isPs && (f === 'x' || f === 'y');
           inp.value = numeric ? r3(s[f]) : s[f];
@@ -676,12 +805,12 @@
       if (!armed()) { box.style.display = 'none'; return; }
       box.style.display = '';
       if (isPt) {
-        $('#ll-title').textContent = 'Nouvelle point load : ' + lab(first);
+        $('#ll-title').textContent = T('new_pl', lab(first));
         $('#ll-fz').value = last.Fz; $('#ll-cx').value = last.Cx; $('#ll-cy').value = last.Cy;
         setTimeout(() => { const q = $('#ll-fz'); q.focus(); q.select(); }, 0);
         return;
       }
-      $('#ll-title').textContent = 'Nouvelle line load : ' + lab(first) + ' → ' + lab(second);
+      $('#ll-title').textContent = T('new_ll', lab(first), lab(second));
       $('#ll-q').value = last.q; $('#ll-c').value = last.c;
       $('#ll-diff').checked = false; $('#ll-end').style.display = 'none';
       setTimeout(() => { const q = $('#ll-q'); q.focus(); q.select(); }, 0);
@@ -694,14 +823,14 @@
     function addLoad() {
       if (isPt) {
         const Fz = $('#ll-fz').value.trim() || '0', Cx = $('#ll-cx').value.trim(), Cy = $('#ll-cy').value.trim();
-        if (isNaN(num(Fz)) || [Cx, Cy].some(bad)) { alert('Valeurs numériques attendues pour Fz, Cx et Cy.'); return; }
+        if (isNaN(num(Fz)) || [Cx, Cy].some(bad)) { alert(T('v_pl')); return; }
         last.Fz = Fz; last.Cx = Cx; last.Cy = Cy;
         loads.push({ x: first.x, y: first.y, Fz, Cx, Cy, label: lab(first), edited: true });
       } else {
         const q = $('#ll-q').value.trim() || '0', c = $('#ll-c').value.trim();
         const diff = $('#ll-diff').checked;
         const q2 = diff ? ($('#ll-q2').value.trim() || '0') : q, c2 = diff ? $('#ll-c2').value.trim() : c;
-        if (isNaN(num(q)) || isNaN(num(q2)) || bad(c) || bad(c2)) { alert('Valeurs numériques attendues pour q et c.'); return; }
+        if (isNaN(num(q)) || isNaN(num(q2)) || bad(c) || bad(c2)) { alert(T('v_ll')); return; }
         last.q = q; last.c = c;
         loads.push({ x1: first.x, y1: first.y, x2: second.x, y2: second.y, q1: q, q2: q2, c1: c, c2: c2, label: lab(first) + ' → ' + lab(second), edited: true });
       }
@@ -714,16 +843,15 @@
     /* ---------- fond PDF : chargement + calibration ---------- */
     function calStatus() {
       const c = S.cal;
-      $('#ll-calst').textContent = !S.page ? '' : calibrated()
-        ? (S.name ? S.name + ' — ' : '') + 'PDF calibré' + (S.numPages > 1 ? ' (page ' + S.pageNum + ')' : '') + ' (conservé pour la session) : échelle 1 m = ' + c.k.toFixed(2) + ' unités du plan' + (c.axis ? ', axe X défini' : ', axe X horizontal') + '.'
-        : (S.name ? S.name + ' — ' : '') + 'PDF chargé' + (S.numPages > 1 ? ' (page ' + S.pageNum + ')' : '') + ' — calibration : échelle, puis origine (0 ; 0).';
+      const pgp = S.numPages > 1 ? T('pg_part', S.pageNum) : '';
+      $('#ll-calst').textContent = !S.page ? '' : (S.name ? S.name + ' — ' : '') + (calibrated() ? T('cal_ok', pgp, c.k.toFixed(2), !!c.axis) : T('cal_todo', pgp));
       $('#ll-calrow').style.display = S.page ? '' : 'none';
       $('#ll-pagerow').style.display = S.page && S.numPages > 1 ? '' : 'none';
       if (S.page && S.numPages > 1) {
         const sl = $('#ll-pg');
         if (sl.options.length !== S.numPages) { sl.innerHTML = ''; for (let i = 1; i <= S.numPages; i++) { const o = document.createElement('option'); o.value = i; o.textContent = i + (S.cals[i] ? ' ✓' : ''); sl.appendChild(o); } }
         else for (let i = 1; i <= S.numPages; i++) sl.options[i - 1].textContent = i + (S.cals[i] ? ' ✓' : '');
-        sl.value = S.pageNum; $('#ll-pgn').textContent = '/ ' + S.numPages + (S.cals[S.pageNum] ? '' : ' (non calibrée)');
+        sl.value = S.pageNum; $('#ll-pgn').textContent = '/ ' + S.numPages + (S.cals[S.pageNum] ? '' : T('uncal'));
         $('#ll-pprev').disabled = S.pageNum <= 1; $('#ll-pnext').disabled = S.pageNum >= S.numPages;
       }
       $('#ll-forget').style.display = S.page ? '' : 'none';
@@ -738,7 +866,7 @@
       inPlan = true; first = second = null; showNew(); fitPlan(); lastBuf = null; setMode(m); blit(); scheduleRender(10);
     }
     function leaveCal() {
-      if (!calibrated()) { alert('Définis d’abord l’échelle et l’origine.'); return; }
+      if (!calibrated()) { alert(T('a_scale_orig')); return; }
       inPlan = false; S.mode = 'draw'; fitWorld(); lastBuf = null; calStatus(); blit(); draw(); scheduleRender(10); saveCal();
     }
     $('#ll-load').onclick = () => $('#ll-file').click();
@@ -760,7 +888,7 @@
     }
     async function gotoPage(n) {
       if (!S.pdf || n === S.pageNum || n < 1 || n > S.numPages) { calStatus(); return; }
-      try { await setPage(n); } catch (err) { alert('Page illisible : ' + (err && err.message || err)); return; }
+      try { await setPage(n); } catch (err) { alert(T('a_page', err && err.message || err)); return; }
       BG.putPage(S.pageNum);
       lastBuf = null;
       if (calibrated()) { inPlan = false; S.mode = 'draw'; fitWorld(); calStatus(); blit(); draw(); scheduleRender(10); }
@@ -777,11 +905,11 @@
         await loadPdfData(buf, 1, {});
         S.name = f.name; await BG.putFile(f.name, buf.slice(0));
         enterPlan('scale');
-      } catch (err) { alert('Impossible de lire ce PDF : ' + (err && err.message || err)); }
+      } catch (err) { alert(T('a_pdf', err && err.message || err)); }
       e.target.value = '';
     };
     $('#ll-forget').onclick = async () => {
-      if (!confirm('Retirer le PDF de la session (plan, échelle et origine) ?')) return;
+      if (!confirm(T('c_forget'))) return;
       await BG.clear();
       S.pdf = S.page = null; S.numPages = 1; S.cals = {}; S.name = ''; S.cal = { k: null, o: null, axis: null, theta: 0 }; S.sa = S.sb = null; S.vx = S.vy = null;
       inPlan = false; S.mode = 'draw'; lastBuf = null; fitWorld(); calStatus(); blit(); draw();
@@ -793,13 +921,13 @@
     $('#ll-snap').onchange = ev => { S.snapOn = ev.target.checked; draw(); };
     $('#ll-bscale').onclick = () => { S.sa = S.sb = null; enterPlan('scale'); };
     $('#ll-borig').onclick = () => { if (!inPlan) enterPlan('origin'); else setMode('origin'); };
-    $('#ll-baxis').onclick = () => { if (!S.cal.o) { alert('Définis d’abord l’origine.'); return; } if (!inPlan) enterPlan('axis'); else setMode('axis'); };
+    $('#ll-baxis').onclick = () => { if (!S.cal.o) { alert(T('a_orig')); return; } if (!inPlan) enterPlan('axis'); else setMode('axis'); };
     $('#ll-bdone').onclick = leaveCal;
     $('#ll-bdist').onclick = () => {
       const d = num($('#ll-dist').value);
-      if (!(d > 0) || !S.sa || !S.sb) { alert('Distance réelle invalide.'); return; }
+      if (!(d > 0) || !S.sa || !S.sb) { alert(T('a_dist')); return; }
       const px = Math.hypot(S.sb.x - S.sa.x, S.sb.y - S.sa.y);
-      if (px < 1e-6) { alert('Les deux points sont confondus.'); return; }
+      if (px < 1e-6) { alert(T('a_same')); return; }
       S.cal.k = px / d; S.sa = S.sb = null; $('#ll-dist').value = ''; saveCal();
       setMode(S.cal.o ? 'scale' : 'origin');
     };
@@ -972,24 +1100,25 @@
     window.addEventListener('resize', onResize);
     const closeEd = () => {
       document.removeEventListener('keydown', onKey); document.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('resize', onResize); clearTimeout(rTimer);
+      window.removeEventListener('resize', onResize); clearTimeout(rTimer); onLang = null;
       if (task) { try { task.cancel(); } catch (e) { /* */ } }
       ov.remove();
     };
+    onLang = () => { calStatus(); renderTable(); showNew(); draw(); };
     $('#ll-close').onclick = closeEd;
 
     /* ---------- application dans le formulaire + Apply ---------- */
     $('#ll-apply').onclick = () => {
-      if (armed()) { alert('Une charge est en cours de saisie : clique « Ajouter » ou annule-la.'); return; }
+      if (armed()) { alert(T('a_busy')); return; }
       if (isPs) {
         const names = new Set();
         for (const s of loads) {
-          if (!s.name) { alert('Un point n’a pas de nom.'); return; }
-          if (names.has(s.name)) { alert('Nom de point en double : ' + s.name); return; }
+          if (!s.name) { alert(T('a_noname')); return; }
+          if (names.has(s.name)) { alert(T('a_dup', s.name)); return; }
           names.add(s.name);
-          if (['Cx', 'Cy', 'Fz'].some(f => s[f] !== '' && !/^(x|1|true|oui)$/i.test(s[f]) && isNaN(num(s[f])))) { alert('Appui invalide pour le point ' + s.name + ' (vide, x ou une raideur numérique).'); return; }
+          if (['Cx', 'Cy', 'Fz'].some(f => s[f] !== '' && !/^(x|1|true|oui)$/i.test(s[f]) && isNaN(num(s[f])))) { alert(T('a_support', s.name)); return; }
         }
-        if (!loads.length && !confirm('Aucun point : tous les points existants seront supprimés. Continuer ?')) return;
+        if (!loads.length && !confirm(T('c_nopts'))) return;
         form.querySelectorAll('tr.point_rows').forEach(tr => tr.remove());
         loads.forEach((s, j) => {
           const k = j + 1;
@@ -1009,7 +1138,7 @@
         return;
       }
       if (isBd) {
-        if (!loads.length && !confirm('Aucun bord défini : tous les bords existants seront supprimés. Continuer ?')) return;
+        if (!loads.length && !confirm(T('c_nobd'))) return;
         form.querySelectorAll('tr.border_rows').forEach(tr => tr.remove());
         loads.forEach((s, j) => {
           const k = j + 1;
@@ -1029,9 +1158,9 @@
       }
       const cols = CFG.cols;
       for (const s of loads) {
-        if (cols.some(f => (/^(q1|q2|Fz)$/.test(f) ? isNaN(num(s[f])) : bad(s[f])))) { alert('Valeur non numérique dans la ligne ' + s.label + '.'); return; }
+        if (cols.some(f => (/^(q1|q2|Fz)$/.test(f) ? isNaN(num(s[f])) : bad(s[f])))) { alert(T('a_nonnum', s.label)); return; }
       }
-      if (!loads.length && !confirm('Aucune charge : toutes les ' + CFG.name + ' existantes seront supprimées. Continuer ?')) return;
+      if (!loads.length && !confirm(T('c_noload', T('nm_' + KEY)))) return;
       form.querySelectorAll('tr.' + CFG.prefix + '_rows').forEach(tr => tr.remove());
       loads.forEach((s, j) => {
         const k = j + 1;
