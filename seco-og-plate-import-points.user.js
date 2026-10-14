@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         seco-og-plate-import-points
 // @namespace    seco-og
-// @version      1.16
+// @version      1.17
 // @description  Plate : éditeurs graphiques de points, bords, line loads et point loads (fond PDF calibré optionnel)
 // @match        https://program.groupseco.com/plate3/*
 // @updateURL    https://raw.githubusercontent.com/oghys/Plate/main/seco-og-plate-import-points.meta.js
@@ -56,6 +56,7 @@
     next: ['Page suivante', 'Volgende pagina', 'Next page'],
     b_scale: ['1. Échelle', '1. Schaal', '1. Scale'],
     b_orig: ['2. Origine', '2. Oorsprong', '2. Origin'],
+    b_axis: ['3. Axe X (option)', '3. X-as (optie)', '3. X axis (option)'],
     b_done: ['Terminer', 'Voltooien', 'Done'],
     dist_lbl: ['Distance réelle :', 'Werkelijke afstand:', 'Real distance:'],
     bd_new: ['Nouveau bord :', 'Nieuwe rand:', 'New border:'],
@@ -99,9 +100,11 @@
     new_ll: [(a, b) => 'Nouvelle line load : ' + a + ' → ' + b, (a, b) => 'Nieuwe line load: ' + a + ' → ' + b, (a, b) => 'New line load: ' + a + ' → ' + b],
     v_pl: ['Valeurs numériques attendues pour Fz, Cx et Cy.', 'Numerieke waarden verwacht voor Fz, Cx en Cy.', 'Numeric values expected for Fz, Cx and Cy.'],
     v_ll: ['Valeurs numériques attendues pour q et c.', 'Numerieke waarden verwacht voor q en c.', 'Numeric values expected for q and c.'],
-    cal_ok: [(pg, k) => 'PDF calibré' + pg + ' (conservé pour la session) : échelle 1 m = ' + k + ' unités du plan.',
-      (pg, k) => 'Pdf gekalibreerd' + pg + ' (bewaard voor de sessie): schaal 1 m = ' + k + ' eenheden van het plan.',
-      (pg, k) => 'PDF calibrated' + pg + ' (kept for the session): scale 1 m = ' + k + ' plan units.'],
+    cal_ok: [(pg, k, ax) => 'PDF calibré' + pg + ' (conservé pour la session) : échelle 1 m = ' + k + ' unités du plan' + (ax ? ', axe X défini' : ', axe X horizontal') + '.',
+      (pg, k, ax) => 'Pdf gekalibreerd' + pg + ' (bewaard voor de sessie): schaal 1 m = ' + k + ' eenheden van het plan' + (ax ? ', X-as bepaald' : ', X-as horizontaal') + '.',
+      (pg, k, ax) => 'PDF calibrated' + pg + ' (kept for the session): scale 1 m = ' + k + ' plan units' + (ax ? ', X axis defined' : ', X axis horizontal') + '.'],
+    h_axis: ['Axe X (optionnel — seulement si le plan est tourné) : clique un point sur l’axe X du repère de Plate, ou « Terminer ».', 'X-as (optioneel — alleen als het plan gedraaid is): klik een punt op de X-as van het Plate-assenstelsel, of « Voltooien ».', 'X axis (optional — only if the plan is rotated): click a point on the X axis of the Plate coordinate system, or “Done”.'],
+    a_orig: ['Définis d’abord l’origine.', 'Bepaal eerst de oorsprong.', 'Define the origin first.'],
     w_both: ['Attention : PDF non calibré. Étape 1 — Échelle : clique sur deux points dont tu connais la distance, puis encode cette distance réelle. Étape 2 — Origine : clique sur le point du plan qui correspond à (0 ; 0).',
       'Opgelet: pdf niet gekalibreerd. Stap 1 — Schaal: klik op twee punten waarvan je de afstand kent en geef die werkelijke afstand in. Stap 2 — Oorsprong: klik op het punt van het plan dat overeenkomt met (0 ; 0).',
       'Warning: PDF not calibrated. Step 1 — Scale: click two points whose distance you know, then enter that real distance. Step 2 — Origin: click the point on the plan that matches (0 ; 0).'],
@@ -111,10 +114,10 @@
     w_orig: ['Attention : origine pas encore positionnée — clique sur le point du plan qui correspond à (0 ; 0) de Plate.',
       'Opgelet: oorsprong nog niet gepositioneerd — klik op het punt van het plan dat overeenkomt met (0 ; 0) van Plate.',
       'Warning: origin not positioned yet — click the point on the plan that matches (0 ; 0) in Plate.'],
-    w_finish: ['Calibration terminée : clique sur « Terminer » (panneau de droite) pour revenir au schéma.',
-      'Kalibratie voltooid: klik op « Voltooien » (rechterpaneel) om terug te keren naar het schema.',
-      'Calibration complete: click “Done” (right panel) to return to the diagram.'],
-    h_done: ['Calibrage défini : clique « Terminer » pour revenir au schéma.', 'Kalibratie bepaald: klik « Voltooien » om terug te keren naar het schema.', 'Calibration set: click “Done” to return to the diagram.'],
+    w_finish: ['Calibration terminée : clique sur « Terminer » (panneau de droite). Optionnel : si le plan est tourné, clique d’abord sur « 3. Axe X », puis sur un point de l’axe X de Plate.',
+      'Kalibratie voltooid: klik op « Voltooien » (rechterpaneel). Optioneel: als het plan gedraaid is, klik eerst op « 3. X-as » en dan op een punt van de X-as van Plate.',
+      'Calibration complete: click “Done” (right panel). Optional: if the plan is rotated, first click “3. X axis”, then a point on the Plate X axis.'],
+    h_done: ['Calibrage défini : clique « Terminer » (ou « 3. Axe X » si le plan est tourné — optionnel).', 'Kalibratie bepaald: klik « Voltooien » (of « 3. X-as » als het plan gedraaid is — optioneel).', 'Calibration set: click “Done” (or “3. X axis” if the plan is rotated — optional).'],
     cal_todo: [pg => 'PDF chargé' + pg + ' — calibration : échelle, puis origine (0 ; 0).', pg => 'Pdf geladen' + pg + ' — kalibratie: schaal, daarna oorsprong (0 ; 0).', pg => 'PDF loaded' + pg + ' — calibration: scale, then origin (0 ; 0).'],
     pg_part: [n => ' (page ' + n + ')', n => ' (pagina ' + n + ')', n => ' (page ' + n + ')'],
     uncal: [' (non calibrée)', ' (niet gekalibreerd)', ' (not calibrated)'],
@@ -497,7 +500,7 @@
       '<select id="ll-pg"></select><button type="button" class="btn" id="ll-pnext" data-it="next">▶</button><span class="mut" id="ll-pgn"></span></div>' +
       '<div class="row" id="ll-calrow" style="display:none">' +
       '<button type="button" class="btn" id="ll-bscale" data-i="b_scale"></button><button type="button" class="btn" id="ll-borig" data-i="b_orig"></button>' +
-      '<button type="button" class="btn" id="ll-bdone" data-i="b_done"></button></div>' +
+      '<button type="button" class="btn" id="ll-baxis" data-i="b_axis"></button><button type="button" class="btn" id="ll-bdone" data-i="b_done"></button></div>' +
       '<div class="row" id="ll-distrow" style="display:none"><span data-i="dist_lbl"></span> <input type="text" id="ll-dist" placeholder="m"> m <button type="button" class="btn" id="ll-bdist">OK</button></div>' +
       '<div class="mut" id="ll-calst"></div></div>' +
       (isBd ? '<div class="sec" id="ll-bdset"><div class="row"><span data-i="bd_new"></span> <span data-i="bd_type"></span> <select id="bd-type"></select> <span data-i="bd_div"></span> <input type="text" id="bd-div" style="width:46px"></div>' +
@@ -535,7 +538,7 @@
     }
     function updateTheta() {
       const c = S.cal;
-      c.axis = null; c.theta = 0;                        // repère non orientable : axes parallèles au plan
+      c.theta = (c.o && c.axis && Math.hypot(c.axis.x - c.o.x, c.axis.y - c.o.y) > 1e-6) ? Math.atan2(c.axis.y - c.o.y, c.axis.x - c.o.x) : 0;
     }
     const wsx = x => x * Vw.z + Vw.px, wsy = y => -y * Vw.z + Vw.py;
     const w2s = p => ({ x: wsx(p.x), y: wsy(p.y) });
@@ -653,7 +656,7 @@
     function hintText() {
       if (inPlan) {
         return S.mode === 'scale' ? (S.sa && S.sb ? T('h_scale2') : T('h_scale'))
-          : S.mode === 'origin' ? T('h_origin') : T('h_done');
+          : S.mode === 'origin' ? T('h_origin') : S.mode === 'axis' ? T('h_axis') : T('h_done');
       }
       if (isBd) return cur ? T('h_from', cur) : T('h_bd');
       if (isPs) return T('h_ps');
@@ -672,6 +675,7 @@
           for (const q of [sa, sb]) { if (!q) continue; ctx.beginPath(); ctx.arc(q.x, q.y, 4, 0, 7); ctx.fill(); }
         }
         drawOrigin();
+        if (S.cal.axis && S.mode === 'axis') { const q = planToScreen(S.cal.axis); ctx.fillStyle = '#0b5cab'; ctx.beginPath(); ctx.arc(q.x, q.y, 3, 0, 7); ctx.fill(); }
         if (hover) {
           const v = S.snapOn && findVertex(screenToPlan(hover.x, hover.y), 12 / Vp.z);
           if (v) { const q = planToScreen(v); ctx.strokeStyle = '#1a8a4a'; ctx.lineWidth = 2; ctx.strokeRect(q.x - 6, q.y - 6, 12, 12); }
@@ -852,7 +856,7 @@
     function calStatus() {
       const c = S.cal;
       const pgp = S.numPages > 1 ? T('pg_part', S.pageNum) : '';
-      $('#ll-calst').textContent = !S.page ? '' : (S.name ? S.name + ' — ' : '') + (calibrated() ? T('cal_ok', pgp, c.k.toFixed(2)) : T('cal_todo', pgp));
+      $('#ll-calst').textContent = !S.page ? '' : (S.name ? S.name + ' — ' : '') + (calibrated() ? T('cal_ok', pgp, c.k.toFixed(2), !!c.axis) : T('cal_todo', pgp));
       const wn = $('#ll-warn');
       const okMsg = S.page && calibrated() && inPlan;
       wn.style.display = S.page && (!calibrated() || okMsg) ? '' : 'none';
@@ -869,6 +873,7 @@
       }
       $('#ll-forget').style.display = S.page ? '' : 'none';
       $('#ll-bscale').classList.toggle('on', inPlan && S.mode === 'scale');
+      $('#ll-baxis').classList.toggle('on', inPlan && S.mode === 'axis');
       $('#ll-borig').classList.toggle('on', inPlan && S.mode === 'origin');
       $('#ll-bdone').disabled = !(inPlan && calibrated());
       $('#ll-distrow').style.display = (inPlan && S.mode === 'scale' && S.sa && S.sb) ? '' : 'none';
@@ -887,7 +892,7 @@
       const page = await S.pdf.getPage(Math.min(Math.max(n || 1, 1), S.pdf.numPages));
       S.page = page; S.pageNum = page.pageNumber; S.vp1 = page.getViewport({ scale: 1 });
       const c = S.cals[S.pageNum];
-      S.cal = c ? { k: c.k, o: c.o, axis: null, theta: 0 } : { k: null, o: null, axis: null, theta: 0 };
+      S.cal = c ? { k: c.k, o: c.o, axis: c.axis || null, theta: c.theta || 0 } : { k: null, o: null, axis: null, theta: 0 };
       S.sa = S.sb = null; S.vx = S.vy = null;
       const v = await extractVerts(L, page, S.vp1); S.vx = v.vx; S.vy = v.vy;
     }
@@ -907,7 +912,7 @@
       else enterPlan('scale');
     }
     const saveCal = () => {
-      if (S.cal.k && S.cal.o) S.cals[S.pageNum] = { k: S.cal.k, o: S.cal.o, axis: null, theta: 0 }; else delete S.cals[S.pageNum];
+      if (S.cal.k && S.cal.o) S.cals[S.pageNum] = { k: S.cal.k, o: S.cal.o, axis: S.cal.axis || null, theta: S.cal.theta || 0 }; else delete S.cals[S.pageNum];
       BG.putCal(S.cal, S.pageNum);
     };
     $('#ll-file').onchange = async e => {
@@ -933,6 +938,7 @@
     $('#ll-snap').onchange = ev => { S.snapOn = ev.target.checked; draw(); };
     $('#ll-bscale').onclick = () => { S.sa = S.sb = null; enterPlan('scale'); };
     $('#ll-borig').onclick = () => { if (!inPlan) enterPlan('origin'); else setMode('origin'); };
+    $('#ll-baxis').onclick = () => { if (!S.cal.o) { alert(T('a_orig')); return; } if (!inPlan) enterPlan('axis'); else setMode('axis'); };
     $('#ll-bdone').onclick = leaveCal;
     $('#ll-bdist').onclick = () => {
       const d = num($('#ll-dist').value);
@@ -951,6 +957,8 @@
         S.cal.o = p; updateTheta(); calStatus(); saveCal();
         if (calibrated()) setMode('done'); else setMode('scale');
         draw();
+      } else if (S.mode === 'axis') {
+        S.cal.axis = p; updateTheta(); calStatus(); saveCal(); draw();
       }
     }
 
